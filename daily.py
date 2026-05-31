@@ -23,6 +23,7 @@ _journal pages use MM-DD.md filenames.
 import argparse
 import os
 import re
+import sqlite3
 import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -32,6 +33,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 VAULT_PATH        = Path(os.environ.get("VAULT_PATH", "./vault"))
+NATSEC_DB_PATH    = os.environ.get("NATSEC_DB_PATH", "")
 OUTBOX_DIR        = VAULT_PATH / "_outbox"
 JOURNAL_DIR       = VAULT_PATH / "_journal"
 STUDY_DIR         = OUTBOX_DIR / "Daily Study"
@@ -96,6 +98,124 @@ def get_study_topic(for_date: date) -> tuple[str, str]:
 
 
 # ── Generate ───────────────────────────────────────────────────────────────
+
+def _inject_todays_jobs(out_path: Path, today: date) -> None:
+    """Pull today's jobs from the natsec DB and append a ## Today's Jobs section."""
+    if not NATSEC_DB_PATH:
+        return
+    db_path = Path(NATSEC_DB_PATH)
+    if not db_path.exists():
+        return
+
+    today_prefix = today.isoformat()  # "2026-05-28"
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT company, title, location, url, fit_score "
+            "FROM jobs WHERE first_seen_utc LIKE ? "
+            "ORDER BY COALESCE(fit_score, 0) DESC",
+            (f"{today_prefix}%",),
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        print(f"  Jobs DB error: {exc}")
+        return
+
+    if not rows:
+        return
+
+    # Group by company, sorted alphabetically
+    grouped: dict[str, list] = {}
+    for r in rows:
+        grouped.setdefault(r["company"], []).append(r)
+
+    lines: list[str] = []
+    for company in sorted(grouped):
+        lines.append(f"### {company}")
+        for r in sorted(grouped[company], key=lambda x: x["title"].lower()):
+            loc = r["location"] or "Unknown"
+            score = r["fit_score"]
+            score_str = f" · fit {score}" if score is not None else ""
+            lines.append(f"- **{r['title']}** ({loc}){score_str}")
+            lines.append(f"  {r['url']}")
+        lines.append("")
+
+    section_body = "\n".join(lines).strip()
+    new_section = f"\n\n---\n## Today's Jobs\n\n{section_body}\n"
+
+    text = out_path.read_text(encoding="utf-8")
+    text = re.sub(r"\n\n---\n## Today's Jobs\n.*?(?=\n## |\Z)", "", text, flags=re.DOTALL)
+    # Strip trailing --- so it doesn't double up
+    text = re.sub(r"\n---\s*$", "", text.rstrip())
+    out_path.write_text(text + new_section + "\n", encoding="utf-8")
+    print(f"  Jobs: {len(rows)} job(s) injected from natsec DB.")
+
+
+def _apply_carryover(out_path: Path, inbox_dir: Path) -> None:
+    """If brief_carryover.md exists, inject its unread items into Today.md and delete it."""
+    carryover_path = inbox_dir / "brief_carryover.md"
+    if not carryover_path.exists():
+        return
+
+    raw = carryover_path.read_text(encoding="utf-8")
+
+    date_m = re.search(r"<!-- carryover_date: (.+?) -->", raw)
+    date_label = date_m.group(1) if date_m else "previous day"
+    raw_body = re.sub(r"<!--.*?-->\n?", "", raw)
+
+    lines = raw_body.splitlines()
+    segments: list[tuple[str, str]] = []
+    current: list[str] = []
+    in_item = False
+
+    for line in lines:
+        if re.match(r"^- \[[ x]\] ", line):
+            if current:
+                segments.append(("other", "\n".join(current)))
+                current = []
+            in_item = True
+            current = [line]
+        elif in_item and (line.startswith("  ") or line == ""):
+            current.append(line)
+        else:
+            if in_item:
+                segments.append(("item", "\n".join(current).rstrip()))
+                current = []
+                in_item = False
+            current.append(line)
+    if current:
+        segments.append(("item" if in_item else "other", "\n".join(current).rstrip()))
+
+    kept: list[str] = []
+    skip_next = False
+    for seg_type, content in segments:
+        if seg_type == "item":
+            if content.startswith("- [x]"):
+                skip_next = True
+                continue
+            kept.append(content)
+            skip_next = False
+        else:
+            cleaned = re.sub(r"(---\s*\n?){2,}", "---\n", content.strip()).strip()
+            if cleaned and not skip_next:
+                kept.append(cleaned)
+            skip_next = False
+
+    carryover_path.unlink()
+
+    if not kept:
+        print("  Brief carryover: all items read — nothing to inject.")
+        return
+
+    body = re.sub(r"\n{3,}", "\n\n", "\n\n".join(kept)).strip()
+    n_unread = len(re.findall(r"^- \[ \]", body, re.MULTILINE))
+    section = f"\n---\n\n## Daily Intelligence Brief\n\n*{n_unread} unread from {date_label}*\n\n{body}\n"
+
+    text = out_path.read_text(encoding="utf-8")
+    out_path.write_text(text.rstrip() + "\n" + section, encoding="utf-8")
+    print(f"  Brief carryover: {n_unread} unread item(s) injected from {date_label}.")
+
 
 def refresh_study(today: date):
     """Re-populate the ## Daily Study heading in an existing note from calendar."""
@@ -244,6 +364,8 @@ sections: [tolstoy, alanon, sententiae, words, quotes, study, notes, reflections
     print(f"Created: Today.md ({date_display})")
     if study_title:
         print(f"  Study topic: {study_title}")
+    _apply_carryover(out_path, INBOX_DIR)
+    _inject_todays_jobs(out_path, today)
 
 
 # ── Parse ──────────────────────────────────────────────────────────────────
