@@ -151,7 +151,7 @@ python3 weekly_report.py --days 14       # look back 14 days instead of 7
 | `com.seang.daily-refresh` | `daily.py --refresh` ⏰ | 8:00am daily | `~/Library/Logs/daily-refresh.log` |
 | `com.seang.daily-parse` | `daily.py --parse` ⏰ | 3:00am daily | `~/Library/Logs/daily-parse.log` |
 | `com.seang.email-scan` | `email_scan.py` ⏰ | noon daily | `~/Library/Logs/email-scan.log` |
-| _(cron)_ | `daily_brief.py` 🟢 ⏰ | 5:00pm daily | `ai_code/daily_brief/output/cron.log` |
+| `com.seang.daily-brief` | `~/scripts/run_daily_brief.sh` → `daily_brief.py` 🟢 ⏰ | 5:00pm daily | `~/scripts/daily_brief_launchd.log` |
 | `com.seang.weekly-report` | `weekly_report.py` 🟢 ⏰ | Sunday 8:00am | `~/Library/Logs/weekly-report.log` |
 
 All jobs fire on wake if the machine was asleep at the scheduled time.
