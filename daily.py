@@ -311,10 +311,10 @@ def generate(today: date):
         # Strip the "Study:" / "Output:" / "Career:" prefix from the calendar title
         clean_title = re.sub(r'^(Study|Output|Career|Writing):\s*', '', study_title)
         study_heading = f"## Daily Study — {clean_title}"
-        study_context = f"{study_desc}\n" if study_desc else ""
+        study_context = f"{study_desc}\n" if study_desc else "\n"
     else:
         study_heading = "## Daily Study"
-        study_context = ""
+        study_context = "\n"
 
     content = f"""---
 date_sort: "{sort_date}"
@@ -345,7 +345,6 @@ sections: [tolstoy, alanon, sententiae, words, quotes, study, notes, reflections
 
 ---
 {study_heading}
-
 {study_context}---
 ## Notes
 
@@ -356,7 +355,6 @@ sections: [tolstoy, alanon, sententiae, words, quotes, study, notes, reflections
 
 ---
 ## Therapy
-
 
 """
 

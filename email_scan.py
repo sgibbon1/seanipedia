@@ -467,7 +467,7 @@ def parse_email_source(raw_source: str, ymd: str) -> str:
                 break
             clean.append(line)
         body = re.sub(r"\n{3,}", "\n\n", "\n".join(clean))
-        return body.strip()
+        return normalize_note_spacing(body)
 
     # ── Plain-text fallback ───────────────────────────────────────────────
     if plain_part is not None:
@@ -511,6 +511,41 @@ def parse_email_date(date_str: str) -> date:
     return date.today()
 
 
+def normalize_note_spacing(text: str) -> str:
+    """Collapse blank lines that the mail client inserted between ordinary
+    adjacent text lines, while preserving ONE blank line before Markdown
+    headings (#..######) and before the start of a list group.
+
+    Rationale: Gmail emits a hard paragraph break (<p> -> blank line) even when
+    Sean only meant a soft line break, so consecutive notes/attributions get
+    spurious blank lines. We keep blanks only where they aid readability:
+    above headings and above the first item of a list.
+    """
+    is_heading   = lambda s: bool(re.match(r"^#{1,6}\s", s))
+    is_list_item = lambda s: bool(re.match(r"^\s*([-*+]|\d+\.)\s", s))
+
+    lines = text.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if lines[i].strip() == "":
+            j = i
+            while j < n and lines[j].strip() == "":
+                j += 1
+            prev = out[-1] if out else ""
+            nxt  = lines[j] if j < n else ""
+            keep = bool(out) and j < n and (
+                is_heading(nxt) or (is_list_item(nxt) and not is_list_item(prev))
+            )
+            if keep:
+                out.append("")
+            i = j
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out).strip()
+
+
 def clean_body(body: str) -> str:
     """Strip Gmail signature, quoted reply chains, and image placeholders."""
     lines = body.splitlines()
@@ -527,7 +562,7 @@ def clean_body(body: str) -> str:
         cleaned.append(line)
     text = "\n".join(cleaned)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return normalize_note_spacing(text)
 
 
 def insert_into_today_notes(content: str) -> bool:
