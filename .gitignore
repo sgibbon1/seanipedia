@@ -4,3 +4,7 @@ __pycache__/
 .env
 *.log
 ~$*
+.email_scan_log.json
+.last_weekly_run
+logs/
+raw/

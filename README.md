@@ -44,7 +44,7 @@ Vault lives in:
 3. **Do nothing at 3:00am** — `daily.py --parse` reads `Today.md`, routes each section to `_outbox/` using the date from frontmatter, and deletes the file.
 
 ### Email notes on the go
-Email yourself at `your.email@alumni.example.edu` with subject `For Notes: <topic>`. The noon `email_scan.py` job picks it up and appends it to `_outbox/Notes/YYYYMMDD.md`.
+Email yourself at `your.email@alumni.example.edu` with subject `For Notes: <topic>`. The noon `email_scan.py` job picks it up and appends it to today's `_inbox/Today.md` under `## Notes` (which `--parse` routes to `_outbox/Notes/YYYYMMDD.md` at 3am, like any other section). Past-dated emails are written straight to `_outbox/Notes/` since that day's note is gone.
 
 ### Weekly report
 A report lands in `vault/_weekly reports/YYYYMMDD.md` every Sunday morning. `__wiki/` pages are updated in the same run.
@@ -65,19 +65,19 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 ## Data Flow
 
 ```
-  daily_brief.py 🟢 ⏰ (5pm daily)      scrape_jobs.py ⏰ (6:15am daily)       daily.py --generate  ⏰ (6am)
-         │                                     │                                           │
-         │ injects ## Daily Intelligence Brief  │ injects ## Jobs                          ▼
-         └─────────────────────────────────────┴──────────────────────────►  _inbox/Today.md
-                                        (daily workspace)
+  daily_brief.py 🟢 ⏰ (5pm)   email_scan.py ⏰ (noon)   scrape_jobs.py ⏰ (6:15am)   daily.py --generate ⏰ (6am)
+         │                            │                         │                               │
+         │ ## Daily Intelligence      │ ## Notes                │ ## Jobs                       ▼
+         │ Brief                      │ (For Notes emails)      │                     _inbox/Today.md
+         └────────────────────────────┴─────────────────────────┴────────────────────────►  (daily workspace)
                                                │
-                              daily.py --parse ⏰ (3am)        email_scan.py ⏰ (noon)
-                                               │                      │
-                    ┌──────────┬──────────┬────┴─────┬──────────┐    │
-                    ▼          ▼          ▼           ▼          ▼    ▼
-               _journal/  _outbox/   _outbox/    _outbox/   _outbox/ _outbox/
-               MM-DD.md   Quotes/    Daily Study/ Therapy/  Reflec-  Notes/
-             (Calendar,   YYYYMMDD   YYYYMMDD     YYYYMMDD  tions/   YYYYMMDD ◄──┘
+                              daily.py --parse ⏰ (3am)
+                                               │
+                    ┌──────────┬──────────┬────┴─────┬──────────┬──────────┐
+                    ▼          ▼          ▼           ▼          ▼          ▼
+               _journal/  _outbox/   _outbox/    _outbox/   _outbox/   _outbox/
+               MM-DD.md   Quotes/    Daily Study/ Therapy/  Reflec-    Notes/
+             (Calendar,   YYYYMMDD   YYYYMMDD     YYYYMMDD  tions/     YYYYMMDD
               Al-Anon,                                       YYYYMMDD
               Sententiae,
               Words)
@@ -127,8 +127,8 @@ Note: `_journal/` is **not** processed by `weekly_report.py`. It is a permanent 
 | `daily.py --generate` ⏰ | Creates today's `_inbox/Today.md` with all sections pre-filled from calendar. | 6:00am daily |
 | `daily.py --refresh` ⏰ | Re-populates `## Daily Study` if the 6am run fired before Calendar synced. | 8:00am daily |
 | `daily.py --parse` ⏰ | Routes each section to `_journal/` or `_outbox/`; appends new Words to `_words.md`; deletes the inbox file. | 3:00am daily |
-| `email_scan.py` ⏰ | Scans Mail for unread "For Notes" messages; appends body to `_outbox/Notes/YYYYMMDD.md`; marks read. | noon daily |
-| `daily_brief.py` 🟢 ⏰ | Fetches ND alumni inbox, filters for AI/natec/geopolitics topics, summarizes with Claude, saves `output/brief_YYYY-MM-DD.md`, inserts `## Daily Intelligence Brief` into `Today.md`. Catches up missed days automatically (up to 7). | 5:00pm daily |
+| `email_scan.py` ⏰ | Scans Mail for unread "For Notes" messages; appends body to today's `Today.md` `## Notes` section (or `_outbox/Notes/YYYYMMDD.md` for past-dated / missing-note cases); marks read. | noon daily |
+| `daily_brief.py` 🟢 ⏰ | Fetches ND alumni inbox, filters for AI/natsec/geopolitics topics, summarizes with Claude, saves `output/brief_YYYY-MM-DD.md`, inserts `## Daily Intelligence Brief` into `Today.md`. Catches up missed days automatically (up to 7). | 5:00pm daily |
 
 ### Weekly (automated via launchd)
 
@@ -161,6 +161,57 @@ To reload a job after editing its plist:
 launchctl unload ~/Library/LaunchAgents/com.seang.<name>.plist
 launchctl load   ~/Library/LaunchAgents/com.seang.<name>.plist
 ```
+
+---
+
+## Daily Brief — Setup & Credentials
+
+`daily_brief.py` lives in the sibling project `ai_code/daily_brief/` (its own `.env`, `credentials/`, and `output/`). It fetches both alumni inboxes, filters for AI / national security / Russia-Ukraine / China / geopolitics, summarizes with Claude, saves `output/brief_YYYY-MM-DD.md`, and injects `## Daily Intelligence Brief` into `Today.md`. Sample output:
+
+```
+# Daily Intelligence Brief — May 24, 2026
+*Generated 08:15 | 7 relevant emails*
+
+## Artificial Intelligence & Emerging Technology
+### [Subject line]
+**From:** Sender Name | **Account:** ND Alumni | **Date:** May 24, 2026
+*Why this matters: [one strategic sentence]*
+[4–7 sentence analyst-quality summary]
+[Open email →](https://mail.google.com/...)
+```
+
+One-time setup configures four things: Python packages, a Google Cloud app (Gmail/ND), a Microsoft Azure app (Graph/JHU), and the Anthropic key.
+
+```bash
+cd ~/Library/CloudStorage/GoogleDrive-.../Sean/Code/ai_code/daily_brief
+pip3 install -r requirements.txt
+```
+
+**Step 1 — Gmail API (Notre Dame, alumni.nd.edu):** at [console.cloud.google.com](https://console.cloud.google.com): New Project `daily-brief` → **APIs & Services → Library** → enable **Gmail API** → **OAuth consent screen** (External; add your `alumni.nd.edu` as a Test User) → **Credentials → Create OAuth client ID → Desktop app**. Open the client and copy **Client ID** (`...apps.googleusercontent.com`) and **Client Secret** (`GOCSPX-...`) into `.env` as `ND_GMAIL_CLIENT_ID` / `ND_GMAIL_CLIENT_SECRET`. No JSON download needed.
+
+**Step 2 — Microsoft Graph API (Johns Hopkins, alumni.jh.edu):** at [portal.azure.com](https://portal.azure.com) (personal Microsoft account, *not* JHU): **App registrations → New registration** — name `daily-brief`, "Accounts in any org directory and personal Microsoft accounts", Redirect URI **Public client/native** = `http://localhost`. Copy the **Application (client) ID**. **API permissions → Add → Microsoft Graph → Delegated → `Mail.ReadWrite`**, then Grant admin consent if the button appears. No client secret needed.
+
+**Step 3 — `.env`:** `cp .env.example .env`, then fill in:
+```
+ANTHROPIC_API_KEY=sk-ant-...          # console.anthropic.com/settings/keys
+ND_EMAIL_ADDRESS=yourname@alumni.nd.edu
+JHU_EMAIL_ADDRESS=yourname@alumni.jh.edu
+JHU_AZURE_CLIENT_ID=paste-from-step-2
+JHU_AZURE_TENANT_ID=common
+JHU_AZURE_CLIENT_SECRET=             # leave blank
+VAULT_TODAY_PATH=/abs/path/to/vault/_inbox/Today.md
+```
+
+**Step 4 — one-time auth:** `python3 setup_auth.py` opens two browser windows (Google + Microsoft); sign into each with the matching alumni account. Tokens are saved to `credentials/` and refresh automatically.
+
+**Run / behavior:** `python3 daily_brief.py`. The brief is inserted before `## Jobs` (or after `## Therapy`); re-running the same day replaces rather than duplicates the section. If the script missed one or more days it auto-catches-up (up to 7 days back; catch-up briefs are written to `output/` only, not `Today.md`). launchd runs it at 5pm via `~/scripts/run_daily_brief.sh`, which first runs `email_scan.py` (serializing Today.md writes) then the brief — a bash wrapper is required because `/bin/bash` needs Full Disk Access to reach the Google Drive path.
+
+**Troubleshooting:**
+- **Gmail auth fails / token expired:** delete `credentials/gmail_token.json`, re-run `setup_auth.py`.
+- **JHU auth fails:** delete `credentials/jhu_token.json`, re-run `setup_auth.py`. If sign-in is blocked, the Azure app may need consent — open `https://login.microsoftonline.com/common/adminconsent?client_id=YOUR_CLIENT_ID`.
+- **JHU emails not appearing:** confirm `alumni.jh.edu` uses Microsoft 365 (log in at [outlook.office.com](https://outlook.office.com)).
+- **Nothing summarized despite relevant mail:** check `output/cron.log`; the keyword filter is broad, so it's usually Claude's second-stage relevance filter.
+- **A trusted newsletter keeps getting missed:** add its sender substring → topic bucket to the `TRUSTED_SENDERS` dict at the top of `daily_brief.py`, e.g. `"newsletters@e.econo": "Economic Competition & Geopolitics"`. That bypasses the keyword stage (Claude's relevance filter still runs).
 
 ---
 

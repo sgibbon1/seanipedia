@@ -1,9 +1,17 @@
 """
-email_scan.py — Scan your.email@alumni.example.edu for "For Notes" emails and route to _outbox/Notes/.
+email_scan.py — Scan your.email@alumni.example.edu for "For Notes" emails and route into the daily note.
 
 Connects to Gmail over IMAP using an App Password (set GMAIL_APP_PASSWORD in .env).
 Matches emails from SENDER_ADDRS whose subject starts with "For Notes" or today's date ("4 May", "04 May", "May 4").
-Deduplicates via .email_scan_log.json and appends to _outbox/Notes/YYYYMMDD.md.
+Deduplicates via .email_scan_log.json.
+
+Routing:
+  - Emails dated *today* are appended to _inbox/Today.md's "## Notes" section
+    (the daily workspace; daily.py --parse routes it to _outbox/Notes/ at 3am).
+  - Past-dated emails (catch-up) go straight to _outbox/Notes/YYYYMMDD.md, since
+    that day's Today.md no longer exists.
+  - If Today.md is missing (machine asleep at 6am generate), today's notes also
+    fall back to _outbox/Notes/YYYYMMDD.md so nothing is lost.
 
 Setup (one-time):
   1. Enable IMAP in Gmail: Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP
@@ -33,6 +41,7 @@ load_dotenv(override=True)
 
 VAULT_PATH      = Path(os.environ.get("VAULT_PATH", "./vault"))
 NOTES_DIR       = VAULT_PATH / "_outbox" / "Notes"
+TODAY_PATH      = VAULT_PATH / "_inbox" / "Today.md"
 ATTACHMENTS_DIR = VAULT_PATH / "attachments"
 PROCESSED_LOG   = Path(__file__).parent / ".email_scan_log.json"
 MAIL_ACCOUNT    = "your.email@alumni.example.edu"
@@ -521,6 +530,26 @@ def clean_body(body: str) -> str:
     return text.strip()
 
 
+def insert_into_today_notes(content: str) -> bool:
+    """Append note content into Today.md's ## Notes section.
+
+    Returns False if Today.md or its ## Notes section can't be found, so the
+    caller can fall back to writing _outbox/Notes/YYYYMMDD.md directly.
+    """
+    if not TODAY_PATH.exists():
+        return False
+    text = TODAY_PATH.read_text(encoding="utf-8")
+    # Capture the body of the ## Notes section, up to the next --- separator.
+    m = re.search(r"## Notes\n(.*?)(?=\n---\n)", text, re.DOTALL)
+    if not m:
+        return False
+    body = m.group(1).strip()
+    addition = (body + "\n\n" if body else "") + content.strip()
+    new_text = text[: m.start(1)] + addition + "\n" + text[m.end(1) :]
+    TODAY_PATH.write_text(new_text, encoding="utf-8")
+    return True
+
+
 def route_to_notes(msg: dict, dry_run: bool) -> None:
     msg_date  = parse_email_date(msg["date_str"])
     ymd       = msg_date.strftime("%Y%m%d")
@@ -535,14 +564,22 @@ def route_to_notes(msg: dict, dry_run: bool) -> None:
         header = ""
     content = f"{header}{body}"
 
-    out_path = NOTES_DIR / f"{ymd}.md"
+    is_today = msg_date == date.today()
 
     if dry_run:
-        print(f"\n  [DRY RUN] Would append to Notes/{ymd}.md:")
+        dest = "Today.md ## Notes" if (is_today and TODAY_PATH.exists()) else f"Notes/{ymd}.md"
+        print(f"\n  [DRY RUN] Would append to {dest}:")
         print(f"  Subject: {subject}")
         print(f"  Preview: {body[:200]}…")
         return
 
+    # Today's notes go into the daily workspace; --parse routes them at 3am.
+    if is_today and insert_into_today_notes(content):
+        print(f"  Routed to Today.md ## Notes — {subject}")
+        return
+
+    # Past-dated emails, or today's notes when Today.md is absent.
+    out_path = NOTES_DIR / f"{ymd}.md"
     NOTES_DIR.mkdir(parents=True, exist_ok=True)
     if out_path.exists():
         existing = out_path.read_text(encoding="utf-8")
