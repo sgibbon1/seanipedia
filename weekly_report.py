@@ -4,7 +4,7 @@ weekly_report.py — Weekly synthesis and report.
 Every Sunday (or on demand):
   1. Collects all _outbox/ content from the past 7 days
   2. Updates relevant __wiki/ pages with new knowledge
-  3. Generates a weekly report: themes, study topics, personal insights, random word
+  3. Generates a weekly report: themes, study topics, personal insights
   4. Saves report to vault/_weekly reports/YYYYMMDD.md
 
 Usage:
@@ -18,7 +18,6 @@ Usage:
 
 import argparse
 import os
-import random
 import re
 import subprocess
 from datetime import date, timedelta
@@ -34,7 +33,6 @@ OUTBOX_DIR        = VAULT_PATH / "_outbox"
 ARCHIVE_DIR       = VAULT_PATH / "archive"
 WIKI_DIR          = VAULT_PATH / "__wiki"
 WEEKLY_DIR        = VAULT_PATH / "_weekly reports"
-WORDS_FILE        = VAULT_PATH / "_words.md"
 
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -305,7 +303,6 @@ Write a clean, well-formatted Markdown report covering the past week. Sections:
 2. **Study Themes** — key topics from Daily Study, with the most important takeaways
 3. **Quotes & Reading** — notable quotes or passages encountered this week
 4. **Personal Insights** — themes from journal, therapy, or reflections (treat sensitively)
-5. **Word of the Week** — one randomly selected vocabulary word with its definition
 
 Tone: warm, direct, like a thoughtful assistant reviewing the week with him.
 Do not be sycophantic. If a section has no content, omit it.
@@ -314,23 +311,8 @@ Return only the Markdown report body — no preamble, no JSON.
 """
 
 
-def random_word() -> str:
-    """Pick a random word from _words.md."""
-    if not WORDS_FILE.exists():
-        return ""
-    lines = [l for l in WORDS_FILE.read_text(encoding="utf-8").splitlines()
-             if re.match(r"^\d+\.", l)]
-    if not lines:
-        return ""
-    return random.choice(lines)
-
-
 def generate_report(outbox_text: str, week_of: date) -> str:
-    word = random_word()
-    prompt = (
-        f"Week of {week_of.strftime('%B %-d, %Y')}:\n\n{outbox_text}\n\n"
-        f"Word of the week (randomly selected from vocabulary list):\n{word}"
-    )
+    prompt = f"Week of {week_of.strftime('%B %-d, %Y')}:\n\n{outbox_text}"
 
     resp = client.messages.create(
         model=MODEL,

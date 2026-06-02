@@ -222,5 +222,5 @@ VAULT_TODAY_PATH=/abs/path/to/vault/_inbox/Today.md
 - **`__wiki/` pages are living documents** — synthesized knowledge rewritten weekly by `weekly_report.py`. Not append-only logs.
 - **Reflections are verbatim** — `_outbox/Reflections/` content is never synthesized or paraphrased, only cleaned up and appended.
 - **Email "For Notes"** — send from `your.email@alumni.example.edu` or `your.email@example.mil` with subject `For Notes: <topic>`.
-- **`_words.md`** — vocabulary list for the weekly Word of the Week. Mark an entry with `(new)` to add it automatically.
+- **`_words.md`** — running vocabulary list. Mark an entry in the daily `## Words` section with `(new)` to append it automatically.
 - **🟢 API spend** — `weekly_report.py` calls Claude twice (wiki synthesis + report generation). Everything else is local.
