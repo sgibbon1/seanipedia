@@ -38,11 +38,24 @@ for i in $(seq 1 60); do
 done
 
 # ── Load env vars ──────────────────────────────────────────────────────────────
+# .env lives on Google Drive (CloudStorage), which intermittently returns EDEADLK
+# ("Resource deadlock avoided") when bash reads a not-yet-materialised cloud file
+# after wake-from-sleep. Under `set -e` that single failure would abort the report.
+# Retry a few times so a transient lock doesn't kill the run.
 if [ -f .env ]; then
     set -a
-    # shellcheck disable=SC1091
-    source .env
+    sourced=0
+    for attempt in 1 2 3 4 5; do
+        # shellcheck disable=SC1091
+        if source .env 2>/dev/null; then sourced=1; break; fi
+        echo "[WARN] .env source failed (attempt ${attempt}/5) — retrying in 3s..."
+        sleep 3
+    done
     set +a
+    if [ "$sourced" -ne 1 ]; then
+        echo "[ERROR] Could not source .env after 5 attempts — aborting; will retry next run."
+        exit 1
+    fi
 fi
 
 # ── Run ────────────────────────────────────────────────────────────────────────
