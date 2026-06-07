@@ -326,10 +326,13 @@ def generate(today: date):
         # Strip the "Study:" / "Output:" / "Career:" prefix from the calendar title
         clean_title = re.sub(r'^(Study|Output|Career|Writing):\s*', '', study_title)
         study_heading = f"## Daily Study — {clean_title}"
-        study_context = f"{study_desc}\n" if study_desc else "\n"
+        # With a description, the heading hugs the description text (no blank line
+        # between them). With no description, fall through to two blank lines so the
+        # empty Daily Study section matches every other heading's default spacing.
+        study_context = f"{study_desc}\n" if study_desc else "\n\n"
     else:
         study_heading = "## Daily Study"
-        study_context = "\n"
+        study_context = "\n\n"
 
     content = f"""---
 date_sort: "{sort_date}"
