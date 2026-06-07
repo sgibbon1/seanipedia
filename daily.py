@@ -297,6 +297,21 @@ def generate(today: date):
             toc_n += today.day
             break
         toc_n += (1 if has_hdr else 0) + _days
+
+    # Off-by-one correction for a defect in the anarchist-library edition:
+    # it is MISSING its "June 6" entry — the body jumps straight from "June 5"
+    # (toc165) to "June 7" (toc166), so June has only 29 day-anchors, not 30.
+    # That pushes every anchor from June 6 onward one too high. The shift would
+    # normally run to year-end, but the _TOC_SECTIONS table above models December
+    # as having no header (it actually does), and that single undercount happens
+    # to cancel the June overcount from Dec 1 on. Net result: only Jun 6–Nov 30
+    # resolve one day ahead, so we subtract one across exactly that window.
+    # June 6 has no anchor at all in this edition, so it falls back to the nearest
+    # prior day (June 5). Verified against the live page's body headings (2026-06);
+    # remove this block if the site ever restores the missing June 6 entry.
+    if (6, 6) <= (today.month, today.day) <= (11, 30):
+        toc_n -= 1
+
     tolstoy_url = (
         f"https://theanarchistlibrary.org/library/leo-tolstoy-a-calendar-of-wisdom"
         f"#toc{toc_n}"
