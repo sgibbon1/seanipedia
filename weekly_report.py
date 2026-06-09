@@ -13,7 +13,8 @@ For each week needing a report it:
   1. Collects _outbox/ content dated within that Sun–Sat window
   2. Updates relevant __wiki/ pages with new knowledge (and archives those files)
   3. Generates a weekly report: themes, study topics, personal insights
-  4. Saves report to vault/_weekly reports/YYYYMMDD.md (named by the week's Sunday)
+  4. Saves report to vault/_weekly reports/YYYYMMDD.md (named by the Sunday AFTER
+     the week — the review day; e.g. the May 31–Jun 6 week is saved as 20260607.md)
 
 State: the last reported week (a Sunday) is recorded in logs/.last_reported_week,
 which makes the script idempotent — safe to run any day, any number of times; it
@@ -559,7 +560,11 @@ def process_week(week_start: date, args) -> None:
     """
     week_end = week_start + timedelta(days=6)
     label = f"{week_start.strftime('%B %-d')} – {week_end.strftime('%B %-d, %Y')}"
-    fname = f"{week_start.strftime('%Y%m%d')}.md"   # named by the week, not run date
+    # Filename = the Sunday AFTER the week's Saturday (the review/publish day),
+    # e.g. the May 31–Jun 6 week is saved as 20260607.md. The H1 label still
+    # shows the period summarised; only the filename uses the following Sunday.
+    report_sunday = week_start + timedelta(days=7)
+    fname = f"{report_sunday.strftime('%Y%m%d')}.md"
     report_path = WEEKLY_DIR / fname
 
     print(f"\n=== Week of {label}  (Sun {week_start.isoformat()} → Sat {week_end.isoformat()}) ===")
