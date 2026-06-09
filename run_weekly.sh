@@ -5,19 +5,13 @@ cd "$(dirname "$0")"
 
 mkdir -p logs
 
-# ── Weekly gate ────────────────────────────────────────────────────────────────
-# Run only if it has been 7 or more days since the last successful run.
-SENTINEL="logs/.last_weekly_run"
-if [ -f "$SENTINEL" ]; then
-    LAST_RUN=$(cat "$SENTINEL")
-    TODAY=$(date +%Y-%m-%d)
-    DAYS_SINCE=$(python3 -c "from datetime import date; print((date.fromisoformat('$TODAY') - date.fromisoformat('$LAST_RUN')).days)")
-    if [ "$DAYS_SINCE" -lt 7 ]; then
-        echo "[INFO] Only ${DAYS_SINCE} day(s) since last run ($LAST_RUN) — skipping."
-        exit 0
-    fi
-    echo "[INFO] ${DAYS_SINCE} day(s) since last run ($LAST_RUN) — proceeding."
-fi
+# ── Scheduling note ─────────────────────────────────────────────────────────────
+# No day-of-week gate here.  weekly_report.py owns all calendar logic: it reports
+# every completed Sun–Sat week that doesn't yet have a report (tracked in
+# logs/.last_reported_week) and is idempotent — running it on the wrong day, or
+# several times a day, generates only what's missing and otherwise does nothing.
+# That lets this wrapper fire from many triggers (Sunday 9am, network reconnect,
+# login) so a week is never skipped, without ever producing a duplicate report.
 
 # ── DNS wait ───────────────────────────────────────────────────────────────────
 # Fires on every resolv.conf change (network reconnect / wake-from-sleep).
@@ -59,8 +53,7 @@ if [ -f .env ]; then
 fi
 
 # ── Run ────────────────────────────────────────────────────────────────────────
+# weekly_report.py records each reported week in logs/.last_reported_week itself,
+# so there is no sentinel to update here.
 python3 weekly_report.py
-
-# Only update the sentinel after a successful run
-date +%Y-%m-%d > "$SENTINEL"
-echo "[INFO] Weekly report complete. Sentinel updated."
+echo "[INFO] Weekly report run complete."

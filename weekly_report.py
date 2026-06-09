@@ -1,20 +1,35 @@
 """
 weekly_report.py — Weekly synthesis and report.
 
-Every Sunday (or on demand):
-  1. Collects all _outbox/ content from the past 7 days
-  2. Updates relevant __wiki/ pages with new knowledge
+Reporting model: a week runs Sunday → Saturday. Each report covers a *completed*
+Sun–Sat week and excludes the upcoming Sunday, so work done on Sean's Sunday
+review/planning day counts toward the next week. Weeks are pinned to the
+calendar, so a late run (laptop asleep on Sunday) still produces the same window
+rather than a drifted one. No week is ever skipped — missed weeks are caught up,
+one report each — and even a quiet week with no activity gets a placeholder
+report so the cadence stays continuous.
+
+For each week needing a report it:
+  1. Collects _outbox/ content dated within that Sun–Sat window
+  2. Updates relevant __wiki/ pages with new knowledge (and archives those files)
   3. Generates a weekly report: themes, study topics, personal insights
-  4. Saves report to vault/_weekly reports/YYYYMMDD.md
+  4. Saves report to vault/_weekly reports/YYYYMMDD.md (named by the week's Sunday)
+
+State: the last reported week (a Sunday) is recorded in logs/.last_reported_week,
+which makes the script idempotent — safe to run any day, any number of times; it
+generates only the weeks that are still missing.
 
 Usage:
-  python3 weekly_report.py                      # run weekly synthesis + report
+  python3 weekly_report.py                      # report all completed-but-missing weeks
+  python3 weekly_report.py --week 2026-05-31    # force one specific week (any date within it)
   python3 weekly_report.py --dry-run            # preview without writing
   python3 weekly_report.py --no-wiki            # skip wiki updates, report only
   python3 weekly_report.py --no-archive         # skip archiving processed files
   python3 weekly_report.py --therapy-bootstrap  # one-time: synthesize all therapy → __wiki/Therapy.md
   python3 weekly_report.py --catchup            # one-time: synthesize + archive pre-window outbox backlog
 """
+
+from __future__ import annotations  # defer annotation eval — supports `X | None` on Python 3.9
 
 import argparse
 import os
@@ -73,41 +88,79 @@ def collect_outbox(days: int = 7) -> dict[str, list[dict]]:
     return collected
 
 
-def collect_outbox_by_dates(max_dates: int = 7) -> tuple[dict[str, list[dict]], list[date]]:
-    """Collect the first max_dates unprocessed day-chunks from _outbox/.
+# ── Calendar-week helpers ──────────────────────────────────────────────────
+# A "report week" runs Sunday → Saturday.  A report always covers a *completed*
+# Sun–Sat week and never the upcoming Sunday, so any work Sean does on his
+# Sunday review/planning day counts toward the next week, not the one he's
+# reviewing.  Weeks are fixed to the calendar, so a late run (laptop asleep on
+# Sunday) still produces the same window rather than a drifted one.
 
-    Rather than a rolling time window, this finds every unique date that
-    appears across all sections, sorts them oldest-first, and takes the
-    first max_dates.  Only files whose dates fall in that window are
-    returned.  Files beyond the window are left in place for the next run.
+# State file (a tiny marker recording the last week we reported) lives next to
+# the script in logs/.  It makes the run idempotent — safe to run repeatedly —
+# and drives catch-up when one or more Sundays were missed.
+STATE_FILE = Path(__file__).resolve().parent / "logs" / ".last_reported_week"
 
-    Returns:
-        collected  — {section: [{date, filename, content}]}
-        window     — sorted list of date objects included (≤ max_dates long)
+
+def most_recent_sunday(d: date) -> date:
+    """Return the Sunday on or before d (Sunday is the start of the week).
+
+    Python's date.weekday() is Mon=0 … Sun=6, so (weekday + 1) % 7 is the
+    number of days back to the most recent Sunday (0 if d is itself a Sunday).
     """
-    # Pass 1: union of all dates across every section
-    all_dates: set[date] = set()
-    for section in OUTBOX_SECTIONS:
-        section_dir = OUTBOX_DIR / section
-        if not section_dir.exists():
-            continue
-        for path in section_dir.glob("*.md"):
-            if path.stem == "_misc":
-                continue
-            try:
-                all_dates.add(date(int(path.stem[:4]),
-                                   int(path.stem[4:6]),
-                                   int(path.stem[6:8])))
-            except (ValueError, IndexError):
-                continue
+    return d - timedelta(days=(d.weekday() + 1) % 7)
 
-    if not all_dates:
-        return {}, []
 
-    window: list[date] = sorted(all_dates)[:max_dates]
-    window_set = set(window)
+def latest_completed_week_start(today: date) -> date:
+    """Sunday that begins the most recent *fully completed* Sun–Sat week.
 
-    # Pass 2: collect files whose dates fall in the window
+    On Sunday June 7 (or any day in the following week) this returns Sunday
+    May 31 — i.e. the week May 31 → June 6, which has fully elapsed.
+    """
+    return most_recent_sunday(today) - timedelta(days=7)
+
+
+def read_last_reported_week() -> date | None:
+    """The week_start (a Sunday) of the last week we successfully reported."""
+    try:
+        return date.fromisoformat(STATE_FILE.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def write_last_reported_week(week_start: date) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(week_start.isoformat() + "\n", encoding="utf-8")
+
+
+def weeks_to_report(today: date) -> list[date]:
+    """Return the list of week_start Sundays that still need a report.
+
+    - First run ever (no state file): just the most recent completed week, so
+      we don't backfill the entire history of the vault.
+    - Otherwise: every completed week after the last one we reported, in order,
+      so multiple missed Sundays each get their own report (never skipped,
+      never merged).
+    """
+    latest = latest_completed_week_start(today)
+    last = read_last_reported_week()
+    if last is None:
+        return [latest]
+    weeks: list[date] = []
+    w = last + timedelta(days=7)
+    while w <= latest:
+        weeks.append(w)
+        w += timedelta(days=7)
+    return weeks
+
+
+def collect_outbox_for_week(week_start: date) -> dict[str, list[dict]]:
+    """Collect _outbox files dated within the Sun–Sat week beginning week_start.
+
+    Only files whose date falls in [week_start, week_start + 6 days] inclusive
+    are returned; anything outside the window (e.g. the upcoming Sunday) is left
+    in place for its own week's run.
+    """
+    week_end = week_start + timedelta(days=6)
     collected: dict[str, list[dict]] = {}
     for section in OUTBOX_SECTIONS:
         section_dir = OUTBOX_DIR / section
@@ -123,7 +176,7 @@ def collect_outbox_by_dates(max_dates: int = 7) -> tuple[dict[str, list[dict]], 
                                  int(path.stem[6:8]))
             except (ValueError, IndexError):
                 continue
-            if file_date not in window_set:
+            if not (week_start <= file_date <= week_end):
                 continue
             content = path.read_text(encoding="utf-8").strip()
             if content:
@@ -132,8 +185,7 @@ def collect_outbox_by_dates(max_dates: int = 7) -> tuple[dict[str, list[dict]], 
                                 "content": content})
         if entries:
             collected[section] = entries
-
-    return collected, window
+    return collected
 
 
 def collect_outbox_before(days: int = 7, sections=None) -> dict:
@@ -311,8 +363,11 @@ Return only the Markdown report body — no preamble, no JSON.
 """
 
 
-def generate_report(outbox_text: str, week_of: date) -> str:
-    prompt = f"Week of {week_of.strftime('%B %-d, %Y')}:\n\n{outbox_text}"
+def generate_report(outbox_text: str, week_start: date, week_end: date) -> str:
+    label = f"{week_start.strftime('%B %-d')} – {week_end.strftime('%B %-d, %Y')}"
+    prompt = (f"Week of {label} "
+              f"(Sunday {week_start.isoformat()} through Saturday {week_end.isoformat()}):"
+              f"\n\n{outbox_text}")
 
     resp = client.messages.create(
         model=MODEL,
@@ -493,6 +548,90 @@ def send_macos_notification(title: str, message: str) -> None:
         print(f"  macOS notification failed: {exc}")
 
 
+# ── Per-week processing ────────────────────────────────────────────────────
+
+def process_week(week_start: date, args) -> None:
+    """Generate the report (and wiki updates) for one Sun–Sat week.
+
+    Always writes a report — even for a quiet week with no logged activity —
+    so the weekly cadence is never broken.  Records the week in the state file
+    on success so it isn't reported again.
+    """
+    week_end = week_start + timedelta(days=6)
+    label = f"{week_start.strftime('%B %-d')} – {week_end.strftime('%B %-d, %Y')}"
+    fname = f"{week_start.strftime('%Y%m%d')}.md"   # named by the week, not run date
+    report_path = WEEKLY_DIR / fname
+
+    print(f"\n=== Week of {label}  (Sun {week_start.isoformat()} → Sat {week_end.isoformat()}) ===")
+    collected = collect_outbox_for_week(week_start)
+
+    report_header = (
+        f"---\ndate: {date.today().isoformat()}\ntype: weekly-report\n"
+        f"week_start: {week_start.isoformat()}\nweek_end: {week_end.isoformat()}\n---\n\n"
+        f"# Weekly Report — {label}\n\n"
+    )
+
+    # ── Quiet week: no logged activity — still emit a placeholder report ─────
+    if not collected:
+        print("  No logged activity this week — writing a brief placeholder.")
+        placeholder = (
+            "_No activity was logged in the vault for this week._\n\n"
+            "Travel, leave, or simply a quiet stretch. The weekly cadence is "
+            "preserved so the record stays continuous."
+        )
+        if args.dry_run:
+            print(f"  [DRY RUN] Would write placeholder: _weekly reports/{fname}")
+            return
+        WEEKLY_DIR.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(report_header + placeholder + "\n", encoding="utf-8")
+        write_last_reported_week(week_start)
+        print(f"  Placeholder saved: _weekly reports/{fname}")
+        return
+
+    total_entries = sum(len(v) for v in collected.values())
+    print(f"  {total_entries} file(s) across {len(collected)} section(s).")
+    outbox_text = format_outbox_for_prompt(collected)
+
+    # ── 1. Wiki synthesis + archive (only the files in this week's window) ───
+    wiki_pages_updated = 0
+    if not args.no_wiki:
+        print("  Building wiki index…")
+        wiki_index = build_wiki_index()
+        print(f"  {len(wiki_index)} wiki pages indexed.")
+        print("  Running wiki synthesis…")
+        wiki_pages_updated = run_wiki_synthesis(outbox_text, wiki_index, dry_run=args.dry_run)
+        print(f"  {wiki_pages_updated} wiki page(s) updated.")
+
+        if not args.no_archive:
+            archived = archive_processed(collected, dry_run=args.dry_run)
+            verb = "[DRY RUN] Would archive" if args.dry_run else "Archived"
+            print(f"  {verb} {archived} file(s).")
+
+    # ── 2. Weekly report ────────────────────────────────────────────────────
+    print("  Generating weekly report…")
+    report_md = generate_report(outbox_text, week_start, week_end)
+    full_report = report_header + report_md
+
+    if args.dry_run:
+        print(f"  [DRY RUN] Would write: _weekly reports/{fname}")
+        print("  " + report_md[:400].replace("\n", "\n  ") + "…")
+        return
+
+    WEEKLY_DIR.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(full_report + "\n", encoding="utf-8")
+    write_last_reported_week(week_start)
+    print(f"  Report saved: _weekly reports/{fname}")
+
+    # ── 3. macOS notification ───────────────────────────────────────────────
+    wiki_str = (f"{wiki_pages_updated} wiki page{'s' if wiki_pages_updated != 1 else ''} updated. "
+                if not args.no_wiki else "")
+    teaser = next((l.strip(" #") for l in report_md.splitlines()
+                   if l.strip() and not l.startswith("#")), "")
+    teaser = teaser[:80] + ("…" if len(teaser) > 80 else "")
+    send_macos_notification(f"Weekly Report — {week_start.strftime('%b %-d')}",
+                            f"{wiki_str}{teaser}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -509,10 +648,12 @@ def main():
                         help="One-time: synthesize all therapy sessions into __wiki/Therapy.md, then exit")
     parser.add_argument("--catchup", action="store_true",
                         help="One-time: synthesize + archive outbox backlog older than --days window, then exit")
+    parser.add_argument("--week", type=str, default=None,
+                        help="Force a specific week by any date within it (YYYY-MM-DD); "
+                             "normalised to that week's Sunday. Bypasses catch-up logic.")
     args = parser.parse_args()
 
     today = date.today()
-    ymd   = today.strftime("%Y%m%d")
 
     if args.therapy_bootstrap:
         run_therapy_bootstrap(dry_run=args.dry_run)
@@ -522,70 +663,33 @@ def main():
         run_catchup(days=args.days, dry_run=args.dry_run)
         return
 
-    print("Collecting _outbox/ content (first 7 unprocessed dates)…")
-    collected, window = collect_outbox_by_dates(max_dates=7)
-
-    if not collected:
-        print("No _outbox/ content found. Nothing to do.")
+    # ── Explicit single-week override (manual / testing) ────────────────────
+    if args.week:
+        try:
+            anchor = date.fromisoformat(args.week)
+        except ValueError:
+            print(f"Invalid --week date '{args.week}'. Use YYYY-MM-DD.")
+            return
+        week_start = most_recent_sunday(anchor)
+        print(f"Forced single week starting Sunday {week_start.isoformat()}.")
+        process_week(week_start, args)
+        print("\nDone.")
         return
 
-    total_entries = sum(len(v) for v in collected.values())
-    date_range = f"{window[0].isoformat()} → {window[-1].isoformat()}" if window else "?"
-    print(f"  {total_entries} file(s) across {len(collected)} section(s) "
-          f"({len(window)} date(s): {date_range}).")
+    # ── Scheduled path: report every completed-but-unreported Sun–Sat week ──
+    # Idempotent — generates only what's missing, so it's safe to run any day
+    # and any number of times.  Catches up one report per missed week.
+    targets = weeks_to_report(today)
+    if not targets:
+        print("All completed weeks already reported. Nothing to do.")
+        return
 
-    outbox_text = format_outbox_for_prompt(collected)
+    print(f"{len(targets)} week(s) to report: "
+          + ", ".join(w.isoformat() for w in targets))
+    for week_start in targets:
+        process_week(week_start, args)
 
-    # ── 1. Wiki synthesis ──────────────────────────────────────────────────
-    wiki_pages_updated = 0
-    if not args.no_wiki:
-        print("\nBuilding wiki index…")
-        wiki_index = build_wiki_index()
-        print(f"  {len(wiki_index)} wiki pages indexed.")
-        print("Running wiki synthesis…")
-        wiki_pages_updated = run_wiki_synthesis(outbox_text, wiki_index, dry_run=args.dry_run)
-        n = wiki_pages_updated
-        print(f"  {n} wiki page(s) updated.")
-
-        if not args.no_archive:
-            print("Archiving processed outbox files…")
-            archived = archive_processed(collected, dry_run=args.dry_run)
-            if args.dry_run:
-                print(f"  [DRY RUN] Would archive {archived} file(s).")
-            else:
-                print(f"  {archived} file(s) archived to archive/.")
-
-    # ── 2. Weekly report ───────────────────────────────────────────────────
-    # Base week_of on the actual dates being processed, not today.
-    week_of = window[0] if window else today
-    print("\nGenerating weekly report…")
-    report_md = generate_report(outbox_text, week_of)
-
-    report_header = (
-        f"---\ndate: {today.isoformat()}\ntype: weekly-report\n---\n\n"
-        f"# Weekly Report — {week_of.strftime('%B %-d, %Y')}\n\n"
-    )
-    full_report = report_header + report_md
-
-    report_path = WEEKLY_DIR / f"{ymd}.md"
-    if args.dry_run:
-        print(f"\n  [DRY RUN] Would write: _weekly reports/{ymd}.md")
-        print(report_md[:500] + "…")
-    else:
-        WEEKLY_DIR.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(full_report + "\n", encoding="utf-8")
-        print(f"  Report saved: _weekly reports/{ymd}.md")
-
-    # ── 4. macOS notification ──────────────────────────────────────────────
-    if not args.dry_run:
-        wiki_str = f"{wiki_pages_updated} wiki page{'s' if wiki_pages_updated != 1 else ''} updated. " if not args.no_wiki else ""
-        # Pull first non-empty line of report body as a teaser
-        teaser = next((l.strip(" #") for l in report_md.splitlines() if l.strip() and not l.startswith("#")), "")
-        teaser = teaser[:80] + ("…" if len(teaser) > 80 else "")
-        notif_msg = f"{wiki_str}{teaser}"
-        send_macos_notification(f"Weekly Report — {week_of.strftime('%b %-d')}", notif_msg)
-
-    print("\nWeekly report complete.")
+    print("\nWeekly report run complete.")
 
 
 if __name__ == "__main__":

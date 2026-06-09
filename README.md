@@ -47,7 +47,7 @@ Vault lives in:
 Email yourself at `your.email@alumni.example.edu` with subject `For Notes: <topic>`. The noon `email_scan.py` job picks it up and appends it to today's `_inbox/Today.md` under `## Notes` (which `--parse` routes to `_outbox/Notes/YYYYMMDD.md` at 3am, like any other section). Past-dated emails are written straight to `_outbox/Notes/` since that day's note is gone.
 
 ### Weekly report
-A report lands in `vault/_weekly reports/YYYYMMDD.md` every Sunday morning. `__wiki/` pages are updated in the same run.
+A report covering one completed **Sunday→Saturday** week lands in `vault/_weekly reports/YYYYMMDD.md` (named by the week's Sunday). It runs on your Sunday review day for the week that just ended, and **excludes the current Sunday** so work you do on review day counts toward the next week. `__wiki/` pages are updated in the same run. No week is ever skipped: if the laptop was asleep the report is caught up later (one report per missed week), and even a quiet week with no activity gets a short placeholder so the cadence stays continuous.
 
 ### If something went wrong
 ```bash
@@ -85,10 +85,10 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
                     └──► _words.md  (Words entries marked "(new)")
 
   ┌─────────────────────────────────────────────────────────────────┐
-  │  _outbox/ content only (7 days) — _journal is NOT processed     │
+  │  _outbox/ for one completed Sun–Sat week — _journal NOT processed│
   └──────────────────────┬──────────────────────────────────────────┘
                          │
-             weekly_report.py  🟢 ⏰ (Sunday 8am)
+             weekly_report.py  🟢 ⏰ (daily 9am; reports completed Sun–Sat weeks)
                     │           │           │
                     ▼           ▼           ▼
                  __wiki/   _weekly      macOS
@@ -134,11 +134,13 @@ Note: `_journal/` is **not** processed by `weekly_report.py`. It is a permanent 
 
 | Script | Purpose | Schedule |
 |---|---|---|
-| `weekly_report.py` 🟢 ⏰ | Reads 7 days of `_outbox/`; updates `__wiki/`; generates report; saves to `_weekly reports/`; archives processed files. | Sunday 8:00am |
+| `weekly_report.py` 🟢 ⏰ | Reports each completed **Sun–Sat** week that doesn't yet have a report: reads that week's `_outbox/`, updates `__wiki/`, generates the report, saves to `_weekly reports/`, archives processed files. Idempotent — tracks the last reported week in `logs/.last_reported_week`, so it's safe to run any day, any number of times, and catches up missed weeks (one report each). | daily 9am (+ wake/login) |
 
 ```bash
-python3 weekly_report.py --no-wiki       # skip wiki updates, report only
-python3 weekly_report.py --days 14       # look back 14 days instead of 7
+python3 weekly_report.py                   # report all completed-but-missing weeks (idempotent)
+python3 weekly_report.py --week 2026-05-31  # force one specific week (any date within it)
+python3 weekly_report.py --no-wiki         # skip wiki updates, report only
+python3 weekly_report.py --dry-run         # preview without writing
 ```
 
 ---
@@ -152,7 +154,7 @@ python3 weekly_report.py --days 14       # look back 14 days instead of 7
 | `com.seang.daily-parse` | `daily.py --parse` ⏰ | 3:00am daily | `~/Library/Logs/daily-parse.log` |
 | `com.seang.email-scan` | `email_scan.py` ⏰ | noon daily | `~/Library/Logs/email-scan.log` |
 | `com.seang.daily-brief` | `~/scripts/run_daily_brief.sh` → `daily_brief.py` 🟢 ⏰ | 5:00pm daily | `~/scripts/daily_brief_launchd.log` |
-| `com.seang.weekly-report` | `weekly_report.py` 🟢 ⏰ | Sunday 8:00am | `~/Library/Logs/weekly-report.log` |
+| `com.seang.weekly-report` | `run_weekly.sh` → `weekly_report.py` 🟢 ⏰ | daily 9am + wake + login | `~/Library/Logs/weekly-report.log` |
 
 All jobs fire on wake if the machine was asleep at the scheduled time.
 
