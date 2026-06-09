@@ -49,12 +49,19 @@ OUTBOX_DIR        = VAULT_PATH / "_outbox"
 ARCHIVE_DIR       = VAULT_PATH / "archive"
 WIKI_DIR          = VAULT_PATH / "__wiki"
 WEEKLY_DIR        = VAULT_PATH / "_weekly reports"
+JOURNAL_DIR       = VAULT_PATH / "_journal"
 
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 MODEL  = "claude-opus-4-7"
 
 OUTBOX_SECTIONS = ["Quotes", "Daily Study", "Notes", "Reflections", "Therapy"]
+
+# Journal sections (the perennial "Calendar of Wisdom" daily practice). These
+# live in _journal/MM-DD.md — one file per calendar day, year in the frontmatter.
+# They are read INTO the weekly report for context but are NEVER archived or fed
+# to wiki synthesis: _journal/ is a permanent personal record, not a staging layer.
+JOURNAL_SECTIONS = ["A Calendar of Wisdom", "Al-Anon", "Sententiae Antiquae", "Words"]
 
 
 # ── Collect _outbox content ────────────────────────────────────────────────
@@ -187,6 +194,56 @@ def collect_outbox_for_week(week_start: date) -> dict[str, list[dict]]:
         if entries:
             collected[section] = entries
     return collected
+
+
+def _split_journal_sections(body: str) -> dict[str, str]:
+    """Split a journal day's body into {section_heading: content}.
+
+    Journal files use level-2 headings (## A Calendar of Wisdom, ## Al-Anon, …)
+    separated by '---' rules. Returns only the JOURNAL_SECTIONS that have content.
+    """
+    out: dict[str, str] = {}
+    # Match each "## Heading\n...content..." up to the next "## " or end of text.
+    for m in re.finditer(r"^##\s+(.+?)\s*$\n(.*?)(?=^##\s+|\Z)", body, re.MULTILINE | re.DOTALL):
+        heading = m.group(1).strip()
+        if heading not in JOURNAL_SECTIONS:
+            continue
+        # Drop trailing horizontal rules and whitespace left by the section split
+        content = re.sub(r"\n-{3,}\s*$", "", m.group(2)).strip()
+        if content:
+            out[heading] = content
+    return out
+
+
+def collect_journal_for_week(week_start: date) -> dict[str, list[dict]]:
+    """Collect the perennial-journal entries for the Sun–Sat week beginning week_start.
+
+    Journal files are _journal/MM-DD.md (one per calendar day, year in the
+    frontmatter date_full). We read each day in the week, confirm the entry's
+    year matches the week (defensive — the files are perennial and may hold
+    other years in future), and return {section: [{date, content}]} keyed by the
+    four JOURNAL_SECTIONS. These feed the report ONLY — never wiki or archive.
+    """
+    week_end = week_start + timedelta(days=6)
+    collected: dict[str, list[dict]] = {}
+    d = week_start
+    while d <= week_end:
+        path = JOURNAL_DIR / f"{d:%m-%d}.md"
+        d_iso = d.isoformat()
+        d += timedelta(days=1)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        # Confirm this file's entry is for the week's year (frontmatter date_full).
+        ym = re.search(r"date_full:\s*\"?[A-Za-z]+ \d{1,2},\s*(\d{4})", text)
+        if ym and int(ym.group(1)) != week_start.year:
+            continue
+        body = re.sub(r"^---\n.*?\n---\n", "", text, count=1, flags=re.DOTALL)
+        for section, content in _split_journal_sections(body).items():
+            collected.setdefault(section, []).append(
+                {"date": d_iso, "filename": path.name, "content": content})
+    # Preserve a stable, human-sensible section order
+    return {s: collected[s] for s in JOURNAL_SECTIONS if s in collected}
 
 
 def collect_outbox_before(days: int = 7, sections=None) -> dict:
@@ -354,8 +411,17 @@ Write a clean, well-formatted Markdown report covering the past week. Sections:
 
 1. **What You Did** — a brief narrative of the week's main activities and focus areas
 2. **Study Themes** — key topics from Daily Study, with the most important takeaways
-3. **Quotes & Reading** — notable quotes or passages encountered this week
-4. **Personal Insights** — themes from journal, therapy, or reflections (treat sensitively)
+3. **Quotes & Reading** — notable quotes or passages encountered this week. Include
+   the week's Sententiae Antiquae (ancient Greek/Latin quotes) and any new Words
+   (vocabulary) from the daily journal practice here.
+4. **Personal Insights** — themes from the journal, therapy, or reflections (treat
+   sensitively). Draw on the daily "A Calendar of Wisdom" and "Al-Anon" readings
+   where they connect to the week's thinking — surface a throughline, don't just
+   list them.
+
+The input includes both the week's OUTBOX sections (Quotes, Daily Study, Notes,
+Reflections, Therapy) and the daily JOURNAL practice (A Calendar of Wisdom, Al-Anon,
+Sententiae Antiquae, Words). Weave the journal in naturally rather than cataloguing it.
 
 Tone: warm, direct, like a thoughtful assistant reviewing the week with him.
 Do not be sycophantic. If a section has no content, omit it.
@@ -569,6 +635,7 @@ def process_week(week_start: date, args) -> None:
 
     print(f"\n=== Week of {label}  (Sun {week_start.isoformat()} → Sat {week_end.isoformat()}) ===")
     collected = collect_outbox_for_week(week_start)
+    journal_collected = collect_journal_for_week(week_start)
 
     report_header = (
         f"---\ndate: {date.today().isoformat()}\ntype: weekly-report\n"
@@ -576,8 +643,8 @@ def process_week(week_start: date, args) -> None:
         f"# Weekly Report — {label}\n\n"
     )
 
-    # ── Quiet week: no logged activity — still emit a placeholder report ─────
-    if not collected:
+    # ── Quiet week: nothing in outbox OR journal — still emit a placeholder ──
+    if not collected and not journal_collected:
         print("  No logged activity this week — writing a brief placeholder.")
         placeholder = (
             "_No activity was logged in the vault for this week._\n\n"
@@ -593,13 +660,19 @@ def process_week(week_start: date, args) -> None:
         print(f"  Placeholder saved: _weekly reports/{fname}")
         return
 
-    total_entries = sum(len(v) for v in collected.values())
-    print(f"  {total_entries} file(s) across {len(collected)} section(s).")
-    outbox_text = format_outbox_for_prompt(collected)
+    n_outbox  = sum(len(v) for v in collected.values())
+    n_journal = sum(len(v) for v in journal_collected.values())
+    print(f"  {n_outbox} outbox file(s)/{len(collected)} section(s); "
+          f"{n_journal} journal entr(ies)/{len(journal_collected)} section(s).")
 
-    # ── 1. Wiki synthesis + archive (only the files in this week's window) ───
+    # Wiki + archive operate on OUTBOX ONLY. The report draws on both the
+    # outbox (the week's output) and the journal (the perennial daily practice).
+    outbox_text = format_outbox_for_prompt(collected)
+    report_text = format_outbox_for_prompt({**collected, **journal_collected})
+
+    # ── 1. Wiki synthesis + archive — outbox only; journal is never archived ─
     wiki_pages_updated = 0
-    if not args.no_wiki:
+    if collected and not args.no_wiki:
         print("  Building wiki index…")
         wiki_index = build_wiki_index()
         print(f"  {len(wiki_index)} wiki pages indexed.")
@@ -614,7 +687,7 @@ def process_week(week_start: date, args) -> None:
 
     # ── 2. Weekly report ────────────────────────────────────────────────────
     print("  Generating weekly report…")
-    report_md = generate_report(outbox_text, week_start, week_end)
+    report_md = generate_report(report_text, week_start, week_end)
     full_report = report_header + report_md
 
     if args.dry_run:
