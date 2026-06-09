@@ -639,7 +639,7 @@ def process_week(week_start: date, args) -> None:
 
     report_header = (
         f"---\ndate: {date.today().isoformat()}\ntype: weekly-report\n"
-        f"week_start: {week_start.isoformat()}\nweek_end: {week_end.isoformat()}\n---\n\n"
+        f"week_start: {week_start.isoformat()}\nweek_end: {week_end.isoformat()}\n---\n"
         f"# Weekly Report — {label}\n\n"
     )
 
