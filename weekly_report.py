@@ -42,6 +42,14 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
+# Token-usage logger (shared copy in each project). No-op if the module is
+# missing so logging can never break a run.
+try:
+    from usage_log import log_usage
+except Exception:  # pragma: no cover
+    def log_usage(*a, **k):
+        pass
+
 load_dotenv(override=True)
 
 VAULT_PATH        = Path(os.environ.get("VAULT_PATH", "./vault"))
@@ -370,6 +378,8 @@ def run_wiki_synthesis(outbox_text: str, wiki_index: list[dict], dry_run: bool) 
         messages=[{"role": "user", "content": prompt}],
     )
 
+    log_usage(resp, project="seanipedia", script="weekly_report.py",
+              model=MODEL, label="wiki")
     raw = resp.content[0].text.strip()
     pattern = re.compile(
         r"<<<\s*(UPDATE|CREATE):\s*(.+?)\s*>>>\n(.*?)<<<\s*END\s*>>>",
@@ -442,6 +452,8 @@ def generate_report(outbox_text: str, week_start: date, week_end: date) -> str:
         system=REPORT_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
+    log_usage(resp, project="seanipedia", script="weekly_report.py",
+              model=MODEL, label="report")
     return resp.content[0].text.strip()
 
 
@@ -521,6 +533,8 @@ def run_therapy_bootstrap(dry_run: bool) -> None:
         system=THERAPY_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
+    log_usage(resp, project="seanipedia", script="weekly_report.py",
+              model=MODEL, label="therapy")
     page_content = resp.content[0].text.strip()
 
     today = date.today()
