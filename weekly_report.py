@@ -42,13 +42,9 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
-# Token-usage logger (shared copy in each project). No-op if the module is
-# missing so logging can never break a run.
-try:
-    from usage_log import log_usage
-except Exception:  # pragma: no cover
-    def log_usage(*a, **k):
-        pass
+# Provider-agnostic completion (Anthropic or Gemini via AI_PROVIDER in .env)
+# with built-in token-usage logging.
+from llm import complete, AI_PROVIDER
 
 load_dotenv(override=True)
 
@@ -60,8 +56,8 @@ WEEKLY_DIR        = VAULT_PATH / "_weekly reports"
 JOURNAL_DIR       = VAULT_PATH / "_journal"
 
 
-client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-MODEL  = "claude-opus-4-7"
+# Anthropic model used when AI_PROVIDER=anthropic; provider/client handled by llm.complete.
+MODEL = "claude-opus-4-7"
 
 OUTBOX_SECTIONS = ["Quotes", "Daily Study", "Notes", "Reflections", "Therapy"]
 
@@ -371,16 +367,11 @@ def run_wiki_synthesis(outbox_text: str, wiki_index: list[dict], dry_run: bool) 
         "Which wiki pages need updating? Write the updated content for each."
     )
 
-    resp = client.messages.create(
-        model=MODEL,
-        max_tokens=8192,
-        system=WIKI_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    log_usage(resp, project="seanipedia", script="weekly_report.py",
-              model=MODEL, label="wiki")
-    raw = resp.content[0].text.strip()
+    raw = complete(
+        system=WIKI_SYSTEM, user=prompt, max_tokens=8192,
+        anthropic_model=MODEL,
+        project="seanipedia", script="weekly_report.py", label="wiki",
+    ).strip()
     pattern = re.compile(
         r"<<<\s*(UPDATE|CREATE):\s*(.+?)\s*>>>\n(.*?)<<<\s*END\s*>>>",
         re.DOTALL,
@@ -446,15 +437,11 @@ def generate_report(outbox_text: str, week_start: date, week_end: date) -> str:
               f"(Sunday {week_start.isoformat()} through Saturday {week_end.isoformat()}):"
               f"\n\n{outbox_text}")
 
-    resp = client.messages.create(
-        model=MODEL,
-        max_tokens=4096,
-        system=REPORT_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    log_usage(resp, project="seanipedia", script="weekly_report.py",
-              model=MODEL, label="report")
-    return resp.content[0].text.strip()
+    return complete(
+        system=REPORT_SYSTEM, user=prompt, max_tokens=4096,
+        anthropic_model=MODEL,
+        project="seanipedia", script="weekly_report.py", label="report",
+    ).strip()
 
 
 # ── Therapy bootstrap ──────────────────────────────────────────────────────
@@ -526,16 +513,12 @@ def run_therapy_bootstrap(dry_run: bool) -> None:
     approx_tokens = total_chars // 4
     print(f"  Approx input size: {approx_tokens:,} tokens.")
 
-    print("Calling Claude for therapy synthesis…")
-    resp = client.messages.create(
-        model=MODEL,
-        max_tokens=4096,
-        system=THERAPY_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    log_usage(resp, project="seanipedia", script="weekly_report.py",
-              model=MODEL, label="therapy")
-    page_content = resp.content[0].text.strip()
+    print("Synthesizing therapy notes…")
+    page_content = complete(
+        system=THERAPY_SYSTEM, user=prompt, max_tokens=4096,
+        anthropic_model=MODEL,
+        project="seanipedia", script="weekly_report.py", label="therapy",
+    ).strip()
 
     today = date.today()
     header = (
