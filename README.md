@@ -84,6 +84,10 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
                     │
                     └──► _words.md  (Words entries marked "(new)")
 
+  ## Daily Intelligence Brief ──► archive/Daily Intelligence Brief/YYYYMMDD.md
+                                   (permanent copy; NOT _outbox — never feeds
+                                   __wiki/ or _weekly reports/)
+
   ┌─────────────────────────────────────────────────────────────────┐
   │  _outbox/ (synthesized+archived) + _journal/ (read for report only)│
   └──────────────────────┬──────────────────────────────────────────┘
@@ -111,7 +115,7 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 | ## Notes | `_outbox/Notes/YYYYMMDD.md` |
 | ## Reflections | `_outbox/Reflections/YYYYMMDD.md` (verbatim) |
 | ## Therapy | `_outbox/Therapy/YYYYMMDD.md` |
-| ## Daily Intelligence Brief | written by `daily_brief.py` at 5 PM — not routed by `--parse` |
+| ## Daily Intelligence Brief | written by `daily_brief.py` at 5 PM; `--parse` copies it to `archive/Daily Intelligence Brief/YYYYMMDD.md` — not `_outbox`, never feeds wiki/weekly reports |
 | ## Jobs | written by `scrape_jobs.py` at 6:15 AM — not routed by `--parse` |
 
 Note: `_journal/` (the four perennial Calendar-of-Wisdom sections) is **read into** the weekly report for context — the week's Sententiae Antiquae and new Words land in *Quotes & Reading*, and the Calendar-of-Wisdom/Al-Anon readings inform *Personal Insights*. But `_journal/` is **never archived or fed to wiki synthesis**: it remains a permanent personal record, separate from the `_outbox/` staging layer. Only `_outbox/` content is synthesized into `__wiki/` and moved to `archive/`.

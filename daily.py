@@ -15,6 +15,9 @@ Sections in the daily note (in order):
   ## Notes                     → _outbox/Notes/YYYYMMDD.md
   ## Reflections               → _outbox/Reflections/YYYYMMDD.md (verbatim)
   ## Therapy                   → _outbox/Therapy/YYYYMMDD.md
+  ## Daily Intelligence Brief  → archive/Daily Intelligence Brief/YYYYMMDD.md
+                                  (saved permanently, but NOT _outbox — never
+                                  feeds the wiki or weekly reports)
 
 Empty sections are skipped. _outbox pages use YYYYMMDD filenames;
 _journal pages use MM-DD.md filenames.
@@ -42,6 +45,8 @@ QUOTES_DIR        = OUTBOX_DIR / "Quotes"
 NOTES_DIR         = OUTBOX_DIR / "Notes"
 REFLECTIONS_DIR   = OUTBOX_DIR / "Reflections"
 WORDS_FILE        = VAULT_PATH / "_words.md"
+ARCHIVE_DIR       = VAULT_PATH / "archive"
+BRIEF_ARCHIVE_DIR = ARCHIVE_DIR / "Daily Intelligence Brief"
 WEEKLY_REPORTS_DIR = VAULT_PATH / "_weekly reports"
 INBOX_DIR         = VAULT_PATH / "_inbox"
 CALENDAR_NAME    = os.environ.get("STUDY_CALENDAR", "your.email@alumni.example.edu")
@@ -560,8 +565,13 @@ def parse(today: date):
         _write_outbox_page(THERAPY_DIR, ymd, date_full, therapy_body)
         print(f"  Therapy: {ymd}.md")
 
-    # ── 7. Brief carryover — save unchecked items for tomorrow ────────────
+    # ── 7. Brief archive — keep a permanent copy, outside _outbox/wiki flow ─
     brief_body = sections.get("Daily Intelligence Brief", "")
+    if _has_content(brief_body):
+        _write_outbox_page(BRIEF_ARCHIVE_DIR, ymd, date_full, brief_body)
+        print(f"  Brief archive: {ymd}.md")
+
+    # ── 8. Brief carryover — save unchecked items for tomorrow ────────────
     if brief_body:
         # Each email is a "- [ ]" or "- [x]" block; split on those markers
         blocks = re.split(r"(?=^- \[[ x]\] )", brief_body, flags=re.MULTILINE)
