@@ -200,6 +200,41 @@ def collect_outbox_for_week(week_start: date) -> dict[str, list[dict]]:
     return collected
 
 
+def _study_is_complete(content: str) -> bool:
+    """Whether a Daily Study entry counts as completed for report/wiki purposes.
+
+    daily.py writes "- [ ] Completed" under a study day's heading; checking it off
+    in Obsidian ("- [x] Completed") marks the day done. We match that LABELLED box
+    specifically (not any checkbox) so an unrelated task list in the notes can't be
+    mistaken for completion. Entries with no completion marker at all — legacy files
+    from before this feature, or study notes written under a bare "## Daily Study"
+    with no scheduled topic — are included by default so nothing is silently dropped.
+    """
+    if re.search(r"^\s*- \[[xX]\]\s*Completed\b", content, re.MULTILINE):
+        return True   # explicitly checked off
+    if re.search(r"^\s*- \[ \]\s*Completed\b", content, re.MULTILINE):
+        return False  # marker present but unchecked → assigned then skipped
+    return True       # no marker → legacy/manual content, keep it
+
+
+def _filter_completed_study(collected: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """Shallow copy of `collected` with Daily Study pruned to completed days only.
+
+    Used for the report + wiki PROMPT text so skipped study days aren't credited.
+    Archiving still operates on the full `collected`, so skipped days are preserved
+    in archive/ as a record that the topic was assigned — they just don't synthesise.
+    """
+    if "Daily Study" not in collected:
+        return collected
+    kept = [e for e in collected["Daily Study"] if _study_is_complete(e["content"])]
+    out = dict(collected)
+    if kept:
+        out["Daily Study"] = kept
+    else:
+        out.pop("Daily Study", None)
+    return out
+
+
 def _split_journal_sections(body: str) -> dict[str, str]:
     """Split a journal day's body into {section_heading: content}.
 
@@ -664,8 +699,11 @@ def process_week(week_start: date, args) -> None:
 
     # Wiki + archive operate on OUTBOX ONLY. The report draws on both the
     # outbox (the week's output) and the journal (the perennial daily practice).
-    outbox_text = format_outbox_for_prompt(collected)
-    report_text = format_outbox_for_prompt({**collected, **journal_collected})
+    # Daily Study only feeds synthesis for days checked off as completed; skipped
+    # days are still archived (below) but don't get credited in the wiki or report.
+    collected_for_synthesis = _filter_completed_study(collected)
+    outbox_text = format_outbox_for_prompt(collected_for_synthesis)
+    report_text = format_outbox_for_prompt({**collected_for_synthesis, **journal_collected})
 
     # ── 1. Wiki synthesis + archive — outbox only; journal is never archived ─
     wiki_pages_updated = 0

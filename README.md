@@ -40,7 +40,7 @@ Vault lives in:
 > **Created by:** `daily.py --generate` (via `com.seang.daily-generate`) at **6:00am daily**
 
 1. **Open today's note** — it lives at `_inbox/Today.md`. Pin a shortcut or use Obsidian's Quick Open to jump to it.
-2. **Write throughout the day** — fill in `## Notes`, `## Quotes`, `## Daily Study`, `## Reflections`, etc. as things come up.
+2. **Write throughout the day** — fill in `## Notes`, `## Quotes`, `## Daily Study`, `## Reflections`, etc. as things come up. When a study topic is scheduled, `## Daily Study` has a `- [ ] Completed` checkbox — tick it off once you've actually done the work so it counts in the weekly report.
 3. **Do nothing at 3:00am** — `daily.py --parse` reads `Today.md`, routes each section to `_outbox/` using the date from frontmatter, and deletes the file.
 
 ### Email notes on the go
@@ -111,7 +111,7 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 | ## Sententiae Antiquae | `_journal/MM-DD.md` |
 | ## Words | `_journal/MM-DD.md` (+ new words → `_words.md`) |
 | ## Quotes | `_outbox/Quotes/YYYYMMDD.md` |
-| ## Daily Study | `_outbox/Daily Study/YYYYMMDD.md` |
+| ## Daily Study | `_outbox/Daily Study/YYYYMMDD.md` — when a topic is scheduled, the section carries a `- [ ] Completed` box; check it off once done. Every day is archived, but `weekly_report.py` only credits **checked** days in the wiki/report (unchecked = assigned-but-skipped; legacy days with no box still count). |
 | ## Notes | `_outbox/Notes/YYYYMMDD.md` |
 | ## Reflections | `_outbox/Reflections/YYYYMMDD.md` (verbatim) |
 | ## Therapy | `_outbox/Therapy/YYYYMMDD.md` |

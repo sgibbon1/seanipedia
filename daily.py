@@ -239,16 +239,18 @@ def refresh_study(today: date):
 
     clean_title = re.sub(r'^(Study|Output|Career|Writing):\s*', '', study_title)
     new_heading = f"## Daily Study — {clean_title}"
-    study_context = f"\n{study_desc}\n" if study_desc else ""
+    # Mirror generate(): a populated study day gets the completion checkbox that
+    # weekly_report.py reads, with study_desc (if any) following it.
+    checkbox = "- [ ] Completed"
+    study_context = f"{checkbox}\n{study_desc}\n" if study_desc else f"{checkbox}\n"
 
     text = out_path.read_text(encoding="utf-8")
 
     # Replace bare "## Daily Study" heading (no topic suffix) with the populated one
     if re.search(r'^## Daily Study\s*$', text, re.MULTILINE):
         text = re.sub(r'^## Daily Study\s*$', new_heading, text, count=1, flags=re.MULTILINE)
-        # Insert study_context after the heading if present
-        if study_context:
-            text = text.replace(new_heading, new_heading + "\n" + study_context, 1)
+        # Insert the checkbox + study_context after the now-populated heading
+        text = text.replace(new_heading, new_heading + "\n" + study_context, 1)
         out_path.write_text(text, encoding="utf-8")
         print(f"Refreshed study heading: {clean_title}")
     else:
@@ -331,10 +333,15 @@ def generate(today: date):
         # Strip the "Study:" / "Output:" / "Career:" prefix from the calendar title
         clean_title = re.sub(r'^(Study|Output|Career|Writing):\s*', '', study_title)
         study_heading = f"## Daily Study — {clean_title}"
-        # With a description, the heading hugs the description text (no blank line
-        # between them). With no description, fall through to two blank lines so the
-        # empty Daily Study section matches every other heading's default spacing.
-        study_context = f"{study_desc}\n" if study_desc else "\n\n"
+        # Completion checkbox: check this off in the daily note once you've actually
+        # done the study. weekly_report.py only credits CHECKED days, so leaving it
+        # unchecked means the topic was assigned but skipped. Only added when there
+        # IS an assigned topic — a bare "## Daily Study" with nothing scheduled gets
+        # no box (nothing to complete).
+        # With a description, the box hugs the description text; without one, a blank
+        # line keeps the section's spacing in line with every other heading.
+        checkbox = "- [ ] Completed\n"
+        study_context = f"{checkbox}{study_desc}\n" if study_desc else f"{checkbox}\n"
     else:
         study_heading = "## Daily Study"
         study_context = "\n\n"
@@ -456,6 +463,11 @@ def _append_new_words(words_text: str, today: date) -> None:
     for line in words_text.splitlines():
         if "(new)" in line.lower():
             cleaned = re.sub(r"\(new\)", "", line, flags=re.IGNORECASE).strip()
+            # Drop any leading enumeration the source line carried (e.g. "714. "),
+            # so we don't double up like "962. 714. word" — _words.md supplies its
+            # own running number below. Require a space after the dot/paren so we
+            # don't clip a real value like a "1.5x" entry that has no space.
+            cleaned = re.sub(r"^\d+[.)]\s+", "", cleaned).strip()
             if cleaned:
                 new_entries.append(cleaned)
 
