@@ -5,7 +5,7 @@
 # committed deliberately so secrets never slip in via a blanket add.
 
 BASE="/Users/yourname/Library/CloudStorage/GoogleDrive-your.email@example.com/My Drive/Sean/Code/ai_code"
-REPOS=("seanipedia" "daily_brief" "natsec_jobs")
+REPOS=("seanipedia" "daily_brief" "natsec_jobs" "perst" "imessage_fact_checker")
 STAMP="$(date '+%Y-%m-%d %H:%M')"
 
 # Wait for the network before `git push`. This fires at 23:30, or on wake if that
