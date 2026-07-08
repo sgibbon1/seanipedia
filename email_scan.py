@@ -1,9 +1,11 @@
 """
-email_scan.py — Scan your.email@alumni.example.edu for "For Notes" emails and route into the daily note.
+email_scan.py — Scan your inbox (MAIL_ACCOUNT) for "For Notes" emails and route into the daily note.
 
 Connects to Gmail over IMAP using an App Password (set GMAIL_APP_PASSWORD in .env).
 Matches emails from SENDER_ADDRS whose subject starts with "For Notes" or today's date ("4 May", "04 May", "May 4").
 Deduplicates via .email_scan_log.json.
+
+Set MAIL_ACCOUNT and SENDER_ADDRS in .env before running — see README.
 
 Routing:
   - Emails dated *today* are appended to _inbox/Today.md's "## Notes" section
@@ -16,7 +18,10 @@ Routing:
 Setup (one-time):
   1. Enable IMAP in Gmail: Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP
   2. Generate an App Password: myaccount.google.com → Security → 2-Step Verification → App Passwords
-  3. Add to .env: GMAIL_APP_PASSWORD=your-16-char-password
+  3. Add to .env:
+       GMAIL_APP_PASSWORD=your-16-char-password
+       MAIL_ACCOUNT=your.email@gmail.com
+       SENDER_ADDRS=your.email@gmail.com,another.address@example.com
 
 Usage:
   python3 email_scan.py            # scan and route new emails
@@ -44,8 +49,11 @@ NOTES_DIR       = VAULT_PATH / "_outbox" / "Notes"
 TODAY_PATH      = VAULT_PATH / "_inbox" / "Today.md"
 ATTACHMENTS_DIR = VAULT_PATH / "attachments"
 PROCESSED_LOG   = Path(__file__).parent / ".email_scan_log.json"
-MAIL_ACCOUNT    = "your.email@alumni.example.edu"
-SENDER_ADDRS    = {"your.email@alumni.example.edu", "your.email@example.mil"}
+# MAIL_ACCOUNT: the inbox to scan. SENDER_ADDRS: comma-separated addresses
+# treated as "you" (self-sent notes) — usually MAIL_ACCOUNT plus any other
+# address you send yourself notes from. Set both in .env (see README).
+MAIL_ACCOUNT    = os.environ.get("MAIL_ACCOUNT", "")
+SENDER_ADDRS    = {a.strip() for a in os.environ.get("SENDER_ADDRS", "").split(",") if a.strip()}
 SCAN_DAYS       = 7
 IMAP_HOST       = "imap.gmail.com"
 IMAP_PORT       = 993
@@ -73,6 +81,8 @@ def _imap_connect() -> imaplib.IMAP4_SSL:
         raise RuntimeError(
             "GMAIL_APP_PASSWORD not set in .env — see setup instructions at the top of this file."
         )
+    if not MAIL_ACCOUNT:
+        raise RuntimeError("MAIL_ACCOUNT not set in .env — see setup instructions at the top of this file.")
     conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
     conn.login(MAIL_ACCOUNT, password)
     return conn

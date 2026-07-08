@@ -34,6 +34,32 @@ Vault lives in:
 
 ---
 
+## Setup
+
+```bash
+pip3 install -r requirements.txt
+cp .env.example .env
+```
+
+Fill in `.env` — every value marked "yours" below is personal to you, never
+committed:
+
+| Variable | Purpose |
+|---|---|
+| `VAULT_PATH` | Absolute path to your Obsidian vault (yours) |
+| `ANTHROPIC_API_KEY` | console.anthropic.com/settings/keys (yours) |
+| `GMAIL_APP_PASSWORD` | For `email_scan.py` — see the comment above it in `.env.example` (yours) |
+| `MAIL_ACCOUNT` | The inbox `email_scan.py` scans (yours) |
+| `SENDER_ADDRS` | Comma-separated addresses treated as "you" for self-sent notes (yours) |
+| `STUDY_CALENDAR` | macOS Calendar name for the Daily Study feature; leave blank to skip it (yours) |
+| `AZURE_CLIENT_ID` | Only needed if you use `resynthesize.py`'s Microsoft Graph features |
+| `NATSEC_DB_PATH` | Only needed if you also run the sibling `natsec_jobs` project |
+
+`git_autocommit.sh` is personal automation for one specific multi-repo layout — see
+the comment at the top of that file before using it as-is.
+
+---
+
 ## How to Use
 
 ### Daily note
@@ -44,7 +70,7 @@ Vault lives in:
 3. **Do nothing at 3:00am** — `daily.py --parse` reads `Today.md`, routes each section to `_outbox/` using the date from frontmatter, and deletes the file.
 
 ### Email notes on the go
-Email yourself at `your.email@alumni.example.edu` with subject `For Notes: <topic>`. The noon `email_scan.py` job picks it up and appends it to today's `_inbox/Today.md` under `## Notes` (which `--parse` routes to `_outbox/Notes/YYYYMMDD.md` at 3am, like any other section). Past-dated emails are written straight to `_outbox/Notes/` since that day's note is gone.
+Email yourself at your configured `MAIL_ACCOUNT` (see **Setup** below) with subject `For Notes: <topic>`. The noon `email_scan.py` job picks it up and appends it to today's `_inbox/Today.md` under `## Notes` (which `--parse` routes to `_outbox/Notes/YYYYMMDD.md` at 3am, like any other section). Past-dated emails are written straight to `_outbox/Notes/` since that day's note is gone.
 
 ### Weekly report
 A report covering one completed **Sunday→Saturday** week lands in `vault/_weekly reports/YYYYMMDD.md`, named by the **Sunday after** that week — i.e. your review day (the May 31–Jun 6 week is saved as `20260607.md`). It runs on your Sunday review day for the week that just ended, and **excludes the current Sunday** so work you do on review day counts toward the next week. The report draws on both the week's `_outbox/` output and the daily `_journal/` practice (Calendar of Wisdom, Al-Anon, Sententiae Antiquae, Words). `__wiki/` pages are updated in the same run (from `_outbox/` only). No week is ever skipped: if the laptop was asleep the report is caught up later (one report per missed week), and even a quiet week with no activity gets a short placeholder so the cadence stays continuous.
@@ -227,6 +253,6 @@ VAULT_TODAY_PATH=/abs/path/to/vault/_inbox/Today.md
 - **`_outbox/` is the staging layer** — every section of every day's note lands here as a dated file. Content is never lost.
 - **`__wiki/` pages are living documents** — synthesized knowledge rewritten weekly by `weekly_report.py`. Not append-only logs.
 - **Reflections are verbatim** — `_outbox/Reflections/` content is never synthesized or paraphrased, only cleaned up and appended.
-- **Email "For Notes"** — send from `your.email@alumni.example.edu` or `your.email@example.mil` with subject `For Notes: <topic>`.
+- **Email "For Notes"** — send from any address listed in your `SENDER_ADDRS` (see **Setup**) with subject `For Notes: <topic>`.
 - **`_words.md`** — running vocabulary list. Mark an entry in the daily `## Words` section with `(new)` to append it automatically.
 - **🟢 API spend** — `weekly_report.py` calls Claude twice (wiki synthesis + report generation). Everything else is local.

@@ -49,7 +49,9 @@ ARCHIVE_DIR       = VAULT_PATH / "archive"
 BRIEF_ARCHIVE_DIR = ARCHIVE_DIR / "Daily Intelligence Brief"
 WEEKLY_REPORTS_DIR = VAULT_PATH / "_weekly reports"
 INBOX_DIR         = VAULT_PATH / "_inbox"
-CALENDAR_NAME    = os.environ.get("STUDY_CALENDAR", "your.email@alumni.example.edu")
+# Set STUDY_CALENDAR in .env to the macOS Calendar name to check for
+# Study/Output/Career events (see README).
+CALENDAR_NAME    = os.environ.get("STUDY_CALENDAR", "")
 
 SCRIPT_DIR = Path(__file__).parent
 
@@ -59,8 +61,14 @@ SCRIPT_DIR = Path(__file__).parent
 def get_study_topic(for_date: date) -> tuple[str, str]:
     """
     Query Mac Calendar via AppleScript for a Study/Output/Career event today.
-    Returns (short_title, description). Falls back to empty strings if not found.
+    Returns (short_title, description). Falls back to empty strings if not found
+    (including when CALENDAR_NAME/STUDY_CALENDAR isn't set — see README).
     """
+    if not CALENDAR_NAME:
+        return "", ""
+    # AppleScript string literal — CALENDAR_NAME comes from our own .env, not
+    # untrusted input, but escape embedded quotes defensively anyway.
+    calendar_name_escaped = CALENDAR_NAME.replace('"', '\\"')
     script = f"""
     tell application "Calendar"
         set theDate to date "{for_date.strftime('%A, %B %d, %Y')}"
@@ -68,7 +76,7 @@ def get_study_topic(for_date: date) -> tuple[str, str]:
         set dayEnd to dayStart + (86400)
         set output to ""
         repeat with cal in calendars
-            if name of cal is "your.email@alumni.example.edu" then
+            if name of cal is "{calendar_name_escaped}" then
                 set evts to every event of cal whose start date >= dayStart and start date <= dayEnd
                 repeat with evt in evts
                     set t to summary of evt

@@ -3,8 +3,13 @@
 # Commits any pending tracked changes (gitignore protects secrets/runtime state)
 # and pushes. Untracked files are intentionally NOT added — new files must be
 # committed deliberately so secrets never slip in via a blanket add.
+#
+# This is personal automation for one specific multi-repo workspace layout
+# (this repo plus several sibling project repos checked out under the same
+# parent folder) — not a general template. If you're adapting this for your
+# own use, edit REPOS below to match whatever sibling repos you actually have.
 
-BASE="/Users/yourname/Library/CloudStorage/GoogleDrive-your.email@example.com/My Drive/Sean/Code/ai_code"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPOS=("seanipedia" "daily_brief" "natsec_jobs" "perst" "imessage_fact_checker")
 STAMP="$(date '+%Y-%m-%d %H:%M')"
 

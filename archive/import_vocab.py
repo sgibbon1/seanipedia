@@ -19,10 +19,12 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-DOCX_PATH = Path(
-    "/Users/yourname/Library/CloudStorage/"
-    "GoogleDrive-your.email@example.com/Мой диск/words document.docx"
-)
+# Archived one-off script — set WORDS_DOCX_PATH in .env to the source .docx
+# before running (not part of the regular pipeline, so not in the default .env).
+_docx_env = os.environ.get("WORDS_DOCX_PATH", "")
+if not _docx_env:
+    raise SystemExit("Set WORDS_DOCX_PATH in .env to the source .docx before running import_vocab.py.")
+DOCX_PATH = Path(_docx_env)
 VAULT_PATH = Path(os.environ.get("VAULT_PATH", "./vault"))
 SOURCE_DIR = VAULT_PATH / "_sources" / "Vocabulary"
 TOPICS_DIR = VAULT_PATH / "_topics"
