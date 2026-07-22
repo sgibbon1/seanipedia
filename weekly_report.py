@@ -44,7 +44,7 @@ from dotenv import load_dotenv
 
 # Provider-agnostic completion (Anthropic or Gemini via AI_PROVIDER in .env)
 # with built-in token-usage logging.
-from llm import complete, AI_PROVIDER
+from llm import complete
 
 load_dotenv(override=True)
 
