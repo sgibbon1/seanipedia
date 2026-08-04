@@ -8,3 +8,6 @@ __pycache__/
 .last_weekly_run
 logs/
 raw/
+
+# Derived quote index — contains personal vault content, rebuildable via quotes_index.py
+quotes_index.json
