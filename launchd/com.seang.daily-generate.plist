@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.seang.daily-generate</string>
+
+    <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/seanmgibbons/scripts/resilient_run.sh</string>
+    <string>daily-generate</string>
+    <string>/Users/seanmgibbons/Library/CloudStorage/GoogleDrive-sgibbons303@gmail.com/My Drive/Sean/Code/ai_code/seanipedia/daily.py</string>
+    <string>2</string>
+    <string>--generate</string>
+  </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/seanmgibbons/Library/Logs/daily-generate.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/seanmgibbons/Library/Logs/daily-generate.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

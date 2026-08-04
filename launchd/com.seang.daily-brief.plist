@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.seang.daily-brief</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/seanmgibbons/scripts/resilient_run.sh</string>
+		<string>daily-brief</string>
+		<string>/Users/seanmgibbons/Library/CloudStorage/GoogleDrive-sgibbons303@gmail.com/My Drive/Sean/Code/ai_code/daily_brief/run_daily_brief.sh</string>
+		<string>2</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardErrorPath</key>
+	<string>/Users/seanmgibbons/scripts/daily_brief_launchd.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/seanmgibbons/scripts/daily_brief_launchd.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>17</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+</dict>
+</plist>

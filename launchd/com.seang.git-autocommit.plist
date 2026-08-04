@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.seang.git-autocommit</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/seanmgibbons/scripts/resilient_run.sh</string>
+		<string>git-autocommit</string>
+		<string>/Users/seanmgibbons/Library/CloudStorage/GoogleDrive-sgibbons303@gmail.com/My Drive/Sean/Code/ai_code/seanipedia/git_autocommit.sh</string>
+		<string>2</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardErrorPath</key>
+	<string>/Users/seanmgibbons/Library/Logs/git-autocommit.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/seanmgibbons/Library/Logs/git-autocommit.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>23</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+</dict>
+</plist>

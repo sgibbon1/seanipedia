@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.seang.weekly-report</string>
+
+    <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/seanmgibbons/scripts/resilient_run.sh</string>
+    <string>weekly-report</string>
+    <string>/Users/seanmgibbons/Library/CloudStorage/GoogleDrive-sgibbons303@gmail.com/My Drive/Sean/Code/ai_code/seanipedia/run_weekly.sh</string>
+    <string>8</string>
+    <string>/Users/seanmgibbons/Library/CloudStorage/GoogleDrive-sgibbons303@gmail.com/My Drive/Sean/Code/ai_code/seanipedia</string>
+  </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/seanmgibbons/Library/CloudStorage/GoogleDrive-sgibbons303@gmail.com/My Drive/Sean/Code/ai_code/seanipedia</string>
+
+    <!-- Hardened triggers — fire often; weekly_report.py is idempotent and only
+         generates reports for completed-but-unreported Sun–Sat weeks:
+           • Daily 9:00am  — reports the prior week each Sunday; if Sunday was
+             missed (laptop asleep), the next morning catches it up.
+           • Network reconnect (resolv.conf change) — covers wake-from-sleep.
+           • RunAtLoad — covers login/restart after extended downtime. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>WatchPaths</key>
+    <array>
+        <string>/private/var/run/resolv.conf</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/seanmgibbons/Library/Logs/weekly-report.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/seanmgibbons/Library/Logs/weekly-report.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
