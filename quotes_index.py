@@ -112,20 +112,28 @@ def _blocks(body: str) -> list[tuple[int, str]]:
         cur_indent, cur_lines = None, []
 
     for raw in body.splitlines():
-        if not raw.strip():           # blank line ends a block
-            flush(); continue
+        # A BLANK LINE IS NOT A BOUNDARY BY ITSELF. In this OneNote export the
+        # lines of a multi-line quote (St. Patrick's Breastplate, the Veronese
+        # Riddle, stacked aphorisms) are INDENTED continuations separated by
+        # blank lines. Treating every blank as a break shattered those poems
+        # into one-line "quotes" — the fragment problem. What actually ends a
+        # block is the next real line: a new list item, a heading, or text
+        # starting back at column 0.
+        if not raw.strip():
+            continue
         if _HEADING_RE.match(raw.strip()):
             flush(); continue          # headings are structure, never quotes
         m = _LIST_RE.match(raw)
+        indent = len(raw[:len(raw) - len(raw.lstrip())].expandtabs(4))
         if m:
-            flush()
+            flush()                    # a new list item always starts a block
             cur_indent = len(m.group(1).expandtabs(4))
             cur_lines = [m.group(2)]
+        elif cur_lines and indent > 0:
+            cur_lines.append(raw)      # indented → continuation of this quote
         else:
-            if cur_lines:
-                cur_lines.append(raw)  # continuation of current block
-            else:
-                cur_indent, cur_lines = 0, [raw]
+            flush()                    # column-0 text → a new standalone block
+            cur_indent, cur_lines = indent, [raw]
     flush()
     return out
 
@@ -209,7 +217,14 @@ def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
         # Phase 2 decides what to surface — a decision he can see and change,
         # rather than one buried in a parser.
         stripped = clean.strip()
+        # Markdown artifacts from the OneNote export (escaped bold/rule markers
+        # like \*\* or \*\*\*) carry no text at all — pure noise, never quotes.
+        is_artifact = bool(stripped) and not re.search(r"[A-Za-zΑ-Ωα-ωА-Яа-я0-9]", stripped)
         is_header = stripped.rstrip(":").lower() in _SECTION_WORDS or stripped == ""
+        if is_artifact:
+            entry["reason"] = "markdown artifact (no text)"
+            flagged.append(entry)
+            continue
         has_quote_mark = any(q in clean for q in _QUOTE_MARKS)
 
         if is_header:

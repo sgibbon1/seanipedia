@@ -12,3 +12,4 @@ raw/
 # Derived quote index — contains personal vault content, rebuildable via quotes_index.py
 quotes_index.json
 quotes_ledger.json
+quotes_fragments_review.md
