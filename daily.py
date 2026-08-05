@@ -336,6 +336,27 @@ def generate(today: date):
         f"-courage-to-change-{today.year}/"
     )
 
+    # Resurfaced quotes from the lifetime collection (quotes_index.json, dealt by
+    # quotes_daily as a shuffled deck so every saved quote comes back around).
+    # These are for REREADING and are NOT re-archived: --parse only routes quotes
+    # marked "(new)", which is how a genuinely new capture is flagged. Without
+    # that split, injected quotes would be re-archived, re-indexed, and resurface
+    # in a feedback loop that also corrupts the daily-capture record.
+    quotes_block = "\n\n"
+    try:
+        import quotes_daily
+        picked, ledger = quotes_daily.pick(
+            quotes_daily.load_index(), quotes_daily.load_ledger(),
+            quotes_daily.DEFAULT_COUNT)
+        if picked:
+            quotes_daily.save_ledger(ledger)
+            quotes_block = ("\n*From the archive — mark anything new you add with "
+                            "(new).*\n\n" + quotes_daily.render(picked) + "\n\n")
+    except SystemExit:
+        pass          # index not built yet — leave the section empty
+    except Exception as exc:
+        print(f"  (quotes: skipped — {exc})")
+
     study_title, study_desc = get_study_topic(today)
     if study_title:
         # Strip the "Study:" / "Output:" / "Career:" prefix from the calendar title
@@ -379,8 +400,7 @@ sections: [tolstoy, alanon, sententiae, words, quotes, study, notes, reflections
 
 ---
 ## Quotes
-
-
+{quotes_block}
 ---
 {study_heading}
 {study_context}---
@@ -459,6 +479,41 @@ def _write_outbox_page(directory: Path, ymd: str, date_full: str, body: str,
     else:
         path.write_text(f"# {title}\n\n{body.strip()}\n", encoding="utf-8")
     return path
+
+
+def _extract_new_quotes(quotes_text: str) -> str:
+    """Return only the quote lines marked '(new)', with the marker stripped.
+
+    Mirrors the ## Words convention: mark a genuinely new capture with (new)
+    anywhere on its line and it gets archived to _outbox/Quotes. Everything else
+    in the section (the morning's resurfaced quotes, the instruction line) is
+    left alone — see the call site for why re-archiving them would be harmful.
+    A multi-line quote should carry (new) on its first line; following indented
+    or blockquote lines are kept with it.
+    """
+    out: list[str] = []
+    capturing = False
+    for line in quotes_text.splitlines():
+        stripped = line.strip()
+        # Skip the injected instruction line — it mentions "(new)" itself and
+        # would otherwise archive itself every single day.
+        if stripped.startswith("*") and stripped.endswith("*") and "archive" in stripped.lower():
+            capturing = False
+            continue
+        if "(new)" in line.lower():
+            cleaned = re.sub(r"\(new\)", "", line, flags=re.IGNORECASE).rstrip()
+            if cleaned.strip():
+                out.append(cleaned)
+            capturing = True
+            continue
+        if capturing:
+            # Keep continuation lines of a multi-line new quote; a blank line or
+            # a new top-level line ends it.
+            if line.strip() and (line.startswith((" ", "\t", ">"))):
+                out.append(line.rstrip())
+            else:
+                capturing = False
+    return "\n".join(out).strip()
 
 
 def _append_new_words(words_text: str, today: date) -> None:
@@ -553,11 +608,18 @@ def parse(today: date):
     else:
         print("  No journal content — skipping.")
 
-    # ── 2. Quotes ──────────────────────────────────────────────────────────
+    # ── 2. Quotes — archive ONLY newly-captured ones ───────────────────────
+    # The ## Quotes section now contains BOTH resurfaced quotes (injected each
+    # morning from the lifetime archive for rereading) and anything Sean adds
+    # that day. Archiving the whole section would re-archive the resurfaced ones,
+    # which then get re-indexed and resurface again — a feedback loop that also
+    # corrupts the record of what was actually captured when. So, mirroring the
+    # ## Words → _words.md convention, only lines marked "(new)" are routed out.
     quotes_body = sections.get("Quotes", "")
-    if _has_content(quotes_body):
-        _write_outbox_page(QUOTES_DIR, ymd, date_full, quotes_body)
-        print(f"  Quotes: {ymd}.md")
+    new_quotes = _extract_new_quotes(quotes_body)
+    if new_quotes:
+        _write_outbox_page(QUOTES_DIR, ymd, date_full, new_quotes)
+        print(f"  Quotes: {ymd}.md ({new_quotes.count(chr(10)) + 1} new line(s))")
 
     # ── 3. Daily Study ─────────────────────────────────────────────────────
     study_heading = next((k for k in sections if k.startswith("Daily Study")), None)
