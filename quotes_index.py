@@ -152,6 +152,57 @@ def _blocks_numbered(body: str) -> list[tuple[int, str]]:
     return out
 
 
+_TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
+_TABLE_SEP_RE = re.compile(r"^[\s|:-]*$")
+# Sententiae Antiquae's convention (Sean, 2026-08-04): each row is
+#   Source  “English translation”  Greek/Latin original
+# with the three parts separated by runs of whitespace.
+_ENGLISH_RE = re.compile(r"[“\"]([^”\"]+)[”\"]")
+
+
+def _uses_table_convention(body: str) -> bool:
+    rows = [l for l in body.splitlines() if _TABLE_ROW_RE.match(l)]
+    return len(rows) >= 5
+
+
+def _parse_table_file(body: str) -> list[dict]:
+    """Parse a table-formatted quote file (Sententiae Antiquae).
+
+    Returns partial entries: text = English translation plus the original-
+    language line beneath it, author = the classical source. Keeping the
+    original alongside the translation is the point of this collection.
+    """
+    entries: list[dict] = []
+    subject: str | None = None
+    for raw in body.splitlines():
+        s = raw.strip()
+        if not s or _HEADING_RE.match(s):
+            continue
+        m_num = _NUM_RE.match(raw)
+        if m_num:                       # "1. Knowledge" — a subject heading
+            subject = raw[m_num.end():].strip()
+            continue
+        m = _TABLE_ROW_RE.match(raw)
+        if not m:
+            continue
+        cell = m.group(1).strip()
+        if not cell or _TABLE_SEP_RE.match(cell):
+            continue                    # table scaffolding (| | and |---|)
+
+        me = _ENGLISH_RE.search(cell)
+        if me:
+            source = cell[:me.start()].strip(" .,")
+            english = me.group(1).strip()
+            original = cell[me.end():].strip()
+        else:                           # no quoted translation — keep it whole
+            source, english, original = "", cell, ""
+
+        text = english if not original else f"{english}\n{original}"
+        entries.append({"text": text.strip(), "author": source or None,
+                        "subtopic": subject})
+    return entries
+
+
 def _blocks(body: str) -> list[tuple[int, str]]:
     """Split a file body into (indent, text) blocks.
 
@@ -242,10 +293,26 @@ def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
     except Exception as exc:
         return [], [{"file": path.name, "text": f"<unreadable: {exc}>", "reason": "read-error"}]
 
-    blocks = _blocks_numbered(body) if _uses_numbered_convention(body) else _blocks(body)
     quotes, flagged = [], []
     topic_from_file = path.stem
     current_subject: str | None = None
+
+    # Table-formatted collections (Sententiae Antiquae) carry Source / English /
+    # original-language in one row and need their own reader — the generic block
+    # parsers only ever saw table pipes and scaffolding.
+    if _uses_table_convention(body):
+        for e in _parse_table_file(body):
+            if not e["text"]:
+                continue
+            quotes.append({
+                "id": quote_id(e["text"]), "text": e["text"], "author": e["author"],
+                "topic": topic_from_file, "subtopic": e["subtopic"],
+                "file": path.name, "collection": collection,
+                "multiline": "\n" in e["text"], "quality": "ok",
+            })
+        return quotes, flagged
+
+    blocks = _blocks_numbered(body) if _uses_numbered_convention(body) else _blocks(body)
 
     for i, (indent, text) in enumerate(blocks):
         next_indent = blocks[i + 1][0] if i + 1 < len(blocks) else -1
