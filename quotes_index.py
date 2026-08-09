@@ -221,29 +221,25 @@ def _blocks(body: str) -> list[tuple[int, str]]:
                 out.append((cur_indent or 0, txt))
         cur_indent, cur_lines = None, []
 
+    # PARAGRAPH MODE — for files that do NOT use the numbered convention
+    # (Found Phrases, Ryan Holiday) and for the daily archive captures. Here the
+    # convention is the opposite of the numbered files (Sean, 2026-08-04):
+    # consecutive lines belong to ONE quote and a BLANK LINE separates quotes.
+    # So "LEGE ET CREDE / HOC EST / SIC EST / … / -Sarcophagus" stays whole.
     for raw in body.splitlines():
-        # A BLANK LINE IS NOT A BOUNDARY BY ITSELF. In this OneNote export the
-        # lines of a multi-line quote (St. Patrick's Breastplate, the Veronese
-        # Riddle, stacked aphorisms) are INDENTED continuations separated by
-        # blank lines. Treating every blank as a break shattered those poems
-        # into one-line "quotes" — the fragment problem. What actually ends a
-        # block is the next real line: a new list item, a heading, or text
-        # starting back at column 0.
         if not raw.strip():
-            continue
+            flush(); continue          # blank line = quote boundary here
         if _HEADING_RE.match(raw.strip()):
             flush(); continue          # headings are structure, never quotes
         m = _LIST_RE.match(raw)
-        indent = len(raw[:len(raw) - len(raw.lstrip())].expandtabs(4))
         if m:
-            flush()                    # a new list item always starts a block
+            flush()
             cur_indent = len(m.group(1).expandtabs(4))
             cur_lines = [m.group(2)]
-        elif cur_lines and indent > 0:
-            cur_lines.append(raw)      # indented → continuation of this quote
+        elif cur_lines:
+            cur_lines.append(raw)      # consecutive line → same quote
         else:
-            flush()                    # column-0 text → a new standalone block
-            cur_indent, cur_lines = indent, [raw]
+            cur_indent, cur_lines = 0, [raw]
     flush()
     return out
 
