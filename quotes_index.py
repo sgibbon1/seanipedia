@@ -261,6 +261,14 @@ _SECTION_WORDS = {w.lower() for w in _SECTION_WORDS}
 
 _ORPHAN_ATTR_RE = re.compile(r"^\s*[-–—]\s*\[?[\"“]?[A-ZΑ-ΩА-Я\[]")
 
+# A bare scripture/reference pointer rather than a quote:
+#   "1 Jn 3:16-18"  "Mt 3:8"  "Job 3:12-21"  "All of Mt 9"  "Ec 10:12-15"
+# Requires a book-like token followed by chapter (and optional verse range),
+# and nothing else — so a real quote that merely cites a verse is unaffected.
+_CITATION_RE = re.compile(
+    r"^(?:[Aa]ll of\s+)?(?:[123]\s*)?[A-Z][A-Za-z]{0,11}\.?\s*\d+"
+    r"(?::\d+)?(?:\s*[-–,]\s*\d+(?::\d+)?)*\.?$")
+
 
 def _merge_orphan_attributions(blocks: list[tuple[int, str]]) -> list[tuple[int, str]]:
     """Fold a block that is ONLY an attribution back into the quote above it.
@@ -383,7 +391,14 @@ def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
             flagged.append(entry)
             continue
 
-        if clean.lower().startswith(("compare ", "see ", "cf.", "note:")):
+        if _CITATION_RE.match(stripped):
+            # A bare scripture reference ("1 Jn 3:16-18", "All of Mt 9") — Sean's
+            # shorthand pointer to a passage, usually under a "Readings from …"
+            # heading. It is NOT a broken quote: there is no missing text, the
+            # entry simply IS a citation. Labelled so the daily rotation can
+            # treat it sensibly instead of surfacing a bare verse number.
+            entry["quality"] = "citation"
+        elif clean.lower().startswith(("compare ", "see ", "cf.", "note:")):
             entry["quality"] = "commentary"      # about a quote, not a quote
         elif len(clean) < MIN_QUOTE_CHARS and not (has_quote_mark or author):
             # Short AND unquoted AND unattributed — most likely a stray line of
