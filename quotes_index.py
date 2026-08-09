@@ -93,6 +93,65 @@ def _split_attrib(text: str) -> tuple[str, str | None]:
     return text[:m.start()].strip(), author
 
 
+_NUM_RE = re.compile(r"^\s*\d+[.)]\s+")
+# Below this share of numbered lines a file isn't using the numbered convention
+# (Found Phrases, Sententiae Antiquae), so fall back to paragraph mode.
+_NUMBERED_MODE_THRESHOLD = 0.30
+
+
+def _uses_numbered_convention(body: str) -> bool:
+    """Sean's convention (confirmed 2026-08-04): in the OneNote-ported lifetime
+    collection, every genuine quote STARTS WITH A NUMBER — anything else is a
+    continuation line the port broke apart. Most files follow it; a few
+    (Found Phrases, Sententiae Antiquae) don't, so measure per file."""
+    lines = [l for l in body.splitlines() if l.strip() and not l.strip().startswith("#")]
+    if len(lines) < 8:
+        return False
+    return sum(1 for l in lines if _NUM_RE.match(l)) / len(lines) >= _NUMBERED_MODE_THRESHOLD
+
+
+def _blocks_numbered(body: str) -> list[tuple[int, str]]:
+    """Parse a file that follows the numbered convention.
+
+    A new quote begins ONLY at a numbered item — with one exception: an
+    attribution line ("-T.S. Eliot") terminates a quote, so the next line starts
+    fresh even without a number. That exception is what keeps a following poem
+    from being swallowed into the previous one when the port dropped its number.
+    """
+    out: list[tuple[int, str]] = []
+    cur_indent, cur_lines, ended = None, [], False
+
+    def flush():
+        nonlocal cur_indent, cur_lines, ended
+        if cur_lines:
+            txt = "\n".join(l.strip() for l in cur_lines).strip()
+            if txt:
+                out.append((cur_indent or 0, txt))
+        cur_indent, cur_lines, ended = None, [], False
+
+    for raw in body.splitlines():
+        if not raw.strip():
+            continue
+        s = raw.strip()
+        if _HEADING_RE.match(s):
+            flush(); continue
+        m = _NUM_RE.match(raw)
+        if m or ended:                       # numbered item, or previous quote closed
+            flush()
+            cur_indent = len(raw[:len(raw) - len(raw.lstrip())].expandtabs(4))
+            cur_lines = [raw[m.end():] if m else s]
+        else:
+            if cur_lines:
+                cur_lines.append(s)          # continuation broken out by the port
+            else:
+                cur_indent, cur_lines = 0, [s]
+        # An attribution line closes the current quote.
+        if re.match(r"^\s*[-–—]\s*\S", raw) and len(s) < 120:
+            ended = True
+    flush()
+    return out
+
+
 def _blocks(body: str) -> list[tuple[int, str]]:
     """Split a file body into (indent, text) blocks.
 
@@ -183,7 +242,7 @@ def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
     except Exception as exc:
         return [], [{"file": path.name, "text": f"<unreadable: {exc}>", "reason": "read-error"}]
 
-    blocks = _blocks(body)
+    blocks = _blocks_numbered(body) if _uses_numbered_convention(body) else _blocks(body)
     quotes, flagged = [], []
     topic_from_file = path.stem
     current_subject: str | None = None
