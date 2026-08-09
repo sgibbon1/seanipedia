@@ -46,8 +46,49 @@ _QUOTE_MARKS = '"“”«»‘’'
 MAX_HEADING_CHARS = 60
 
 
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _outline_level(p) -> int | None:
+    """Word's list level (ilvl) for a paragraph, or None if it isn't a list item.
+
+    THE KEY TO THIS FORMAT. Word renders the outline markers (1. / a. / i.) as
+    AUTO-NUMBERING — they are not in paragraph.text and left_indent stays 0, so
+    neither text nor indentation reveals the structure. The real hierarchy lives
+    in the numbering XML. In Sean's export:
+        ilvl 1 = topic (1., 2., …)      ilvl 2 = quote (a., b., …)
+        ilvl 3 = sub-quote (i., ii., …) None   = wrapped continuation line
+    """
+    npr = p._p.find(f".//{W}numPr")
+    if npr is None:
+        return None
+    il = npr.find(f"{W}ilvl")
+    return int(il.get(f"{W}val")) if il is not None else 0
+
+
+def read_outline(path: Path) -> list[tuple[int, str]]:
+    """Return [(level, text)] using Word's real outline levels.
+
+    A paragraph with no list level continues the entry above it (that's how a
+    two-line couplet like Harrington's arrives), so it is folded in rather than
+    becoming a stray entry.
+    """
+    d = docx.Document(str(path))
+    entries: list[list] = []
+    for p in d.paragraphs:
+        text = p.text.strip()
+        if not text:
+            continue
+        lvl = _outline_level(p)
+        if lvl is None and entries:
+            entries[-1][1].append(text)      # continuation of previous entry
+        else:
+            entries.append([lvl if lvl is not None else 1, [text]])
+    return [(lvl, "\n".join(lines)) for lvl, lines in entries]
+
+
 def read_blocks(path: Path) -> list[str]:
-    """Group the docx's flat paragraphs into entries using indentation."""
+    """Legacy path: group flat paragraphs by indentation (older export style)."""
     d = docx.Document(str(path))
     blocks: list[list[str]] = []
     for p in d.paragraphs:
@@ -57,7 +98,7 @@ def read_blocks(path: Path) -> list[str]:
         ind = p.paragraph_format.left_indent
         indented = bool(ind and ind.inches > 0.1)
         if indented and blocks:
-            blocks[-1].append(text)      # continuation of the previous entry
+            blocks[-1].append(text)
         else:
             blocks.append([text])
     return ["\n".join(b) for b in blocks]
@@ -78,6 +119,34 @@ def is_heading(text: str, nxt: str | None) -> bool:
     if text.rstrip().endswith((".", "!", "?", ":", ";", ",")):
         return False
     return nxt is not None                        # headings introduce something
+
+
+def build_markdown_outline(entries: list[tuple[int, str]], title: str) -> tuple[str, dict]:
+    """Render Word outline levels as the collection's standard nested numbering.
+
+    Levels are normalised so the shallowest present level becomes top-level,
+    then each level is numbered independently and indented 3 spaces per depth —
+    matching the other files, so the indexer's numbered-mode parser reads it
+    without any special-casing.
+    """
+    levels = sorted({lvl for lvl, _ in entries})
+    base = levels[0] if levels else 1
+    counters: dict[int, int] = {}
+    out = [f"# {title}", ""]
+    stats = {"topics": 0, "quotes": 0, "details": 0}
+
+    for lvl, text in entries:
+        depth = max(0, lvl - base)
+        counters[depth] = counters.get(depth, 0) + 1
+        for deeper in [k for k in list(counters) if k > depth]:
+            del counters[deeper]           # restart numbering inside a new parent
+        pad = "   " * depth
+        lines = text.splitlines()
+        out.append(f"{pad}{counters[depth]}. {lines[0]}")
+        for cont in lines[1:]:
+            out.append(f"{pad}   {cont}")
+        stats["topics" if depth == 0 else "quotes" if depth == 1 else "details"] += 1
+    return "\n".join(out) + "\n", stats
 
 
 def build_markdown(blocks: list[str], title: str) -> tuple[str, int, int]:
@@ -120,8 +189,17 @@ def main() -> None:
         raise SystemExit(f"not found: {src}")
     title = args.title or src.stem
 
-    blocks = read_blocks(src)
-    body, n_quote, n_head = build_markdown(blocks, title)
+    # Prefer Word's real outline levels; fall back to indentation for older exports.
+    entries = read_outline(src)
+    if any(l is not None for l, _ in entries) and len({l for l, _ in entries}) > 1:
+        body, stats = build_markdown_outline(entries, title)
+        print(f"outline   : {stats['topics']} topics, {stats['quotes']} quotes, "
+              f"{stats['details']} sub-details")
+        n_quote, n_head = stats["quotes"], stats["topics"]
+    else:
+        blocks = read_blocks(src)
+        body, n_quote, n_head = build_markdown(blocks, title)
+        print("outline   : (no list levels found — used indentation fallback)")
 
     fm = (f"---\ntitle: \"{title}\"\ntype: reflection\n"
           f"notebook: \"Τά εἰς ἑαυτόν\"\nsection: \"Quotes\"\n"
@@ -132,7 +210,7 @@ def main() -> None:
 
     target = QUOTES_DIR / f"{title}.md"
     print(f"docx      : {src}")
-    print(f"entries   : {len(blocks)}  ->  {n_quote} quotes, {n_head} subject headings")
+    print(f"entries   : {n_quote} quotes, {n_head} topics")
     print(f"target    : {target}")
     if target.exists():
         old = target.read_text(encoding="utf-8")
