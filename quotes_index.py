@@ -259,6 +259,31 @@ _SECTION_WORDS = {
 _SECTION_WORDS = {w.lower() for w in _SECTION_WORDS}
 
 
+_ORPHAN_ATTR_RE = re.compile(r"^\s*[-–—]\s*\[?[\"“]?[A-ZΑ-ΩА-Я\[]")
+
+
+def _merge_orphan_attributions(blocks: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Fold a block that is ONLY an attribution back into the quote above it.
+
+    A blank line or a stray number between a quote and its "-Author" line makes
+    the attribution parse as its own entry — leaving the quote unattributed and
+    the attribution floating as a meaningless one-liner (e.g. Reginald Heber's
+    hymn, the Seikilos Epitaph). No text is lost either way; this just puts the
+    two halves back together.
+    """
+    out: list[tuple[int, str]] = []
+    for indent, text in blocks:
+        stripped = text.strip()
+        is_only_attr = (_ORPHAN_ATTR_RE.match(stripped)
+                        and "\n" not in stripped and len(stripped) < 140)
+        if is_only_attr and out:
+            prev_indent, prev_text = out[-1]
+            out[-1] = (prev_indent, f"{prev_text}\n{stripped}")
+        else:
+            out.append((indent, text))
+    return out
+
+
 def _looks_like_category(text: str, has_children: bool, indent: int,
                          file_stem: str) -> bool:
     """Is this list item a grouping header rather than a quote?
@@ -309,6 +334,7 @@ def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
         return quotes, flagged
 
     blocks = _blocks_numbered(body) if _uses_numbered_convention(body) else _blocks(body)
+    blocks = _merge_orphan_attributions(blocks)
 
     for i, (indent, text) in enumerate(blocks):
         next_indent = blocks[i + 1][0] if i + 1 < len(blocks) else -1
