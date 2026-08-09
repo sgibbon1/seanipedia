@@ -292,9 +292,12 @@ def _looks_like_category(text: str, has_children: bool, indent: int,
     left out, so ambiguity resolves toward "this is a quote." A stray header in
     the rotation costs one skim; a dropped quote is invisible and permanent.
     """
+    # Detect grouping STRUCTURALLY rather than by a hardcoded file list. This
+    # used to be limited to three known files because the flat, port-damaged
+    # sources had no reliable nesting to read. Now that pages re-imported from
+    # OneNote carry their real outline, "has children" is trustworthy — and it
+    # can't misfire on a flat file, since nothing there is ever deeper-indented.
     if not has_children or indent != 0:
-        return False
-    if file_stem not in _GROUPED_FILES:
         return False
     if len(text) > MAX_CATEGORY_CHARS:
         return False

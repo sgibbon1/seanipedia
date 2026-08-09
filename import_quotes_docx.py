@@ -87,6 +87,75 @@ def read_outline(path: Path) -> list[tuple[int, str]]:
     return [(lvl, "\n".join(lines)) for lvl, lines in entries]
 
 
+def read_html_outline(path: Path) -> list[tuple[int, str]]:
+    """Read a OneNote page's exported HTML, preserving its <ol>/<li> nesting.
+
+    The Graph API returns the page with its outline intact — real nested <ol>
+    elements — which is strictly better than any copy-paste into Word (Word
+    drops the structure) and better than the legacy markdownify converter, which
+    flattens the nesting and re-splits multi-line quotes on <br>.
+
+    Depth comes from counting list ancestors, so OneNote's numbering scheme
+    (Arabic topic / roman quote / whatever below) maps straight onto levels
+    without caring which glyph Word or the browser happens to render.
+    """
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(path.read_bytes(), "html.parser")
+    entries: list[list] = []
+    loose_run = False
+
+    def own_text(el) -> str:
+        """Text of this element only, excluding any nested list — otherwise a
+        topic would swallow every quote beneath it."""
+        clone = BeautifulSoup(str(el), "html.parser")
+        for nested in clone.find_all(["ol", "ul"]):
+            nested.decompose()
+        for br in clone.find_all("br"):
+            br.replace_with("\n")
+        for blk in clone.find_all(["p", "div"]):
+            blk.append("\n")
+        return "\n".join(l.strip() for l in clone.get_text().splitlines() if l.strip())
+
+    # Walk <li> and <p> in DOCUMENT ORDER. Critical: OneNote emits the
+    # continuation lines of a multi-line quote as <p> siblings that sit INSIDE
+    # the <ol> but AFTER the closing </li> — not nested within the item. Reading
+    # only <li> elements silently dropped 88 lines of poetry (St. Patrick's
+    # Breastplate lost every line but its first). So a <p> whose parent is a
+    # list continues the entry above it.
+    for el in soup.find_all(["li", "p"]):
+        if el.name == "li":
+            depth = len([a for a in el.parents if a.name in ("ol", "ul")]) - 1
+            text = own_text(el)
+            if text:
+                entries.append([max(0, depth), [text]])
+                loose_run = False
+        else:  # <p>
+            # ORDER MATTERS. A continuation <p> sits directly inside the <ol>,
+            # but that <ol> is itself inside the parent topic's <li> — so a
+            # find_parent("li") test fires first and wrongly skips it. Judge by
+            # the DIRECT parent: parent is a list => continuation line.
+            if el.parent is not None and el.parent.name in ("ol", "ul"):
+                if entries:
+                    text = own_text(el)
+                    if text:
+                        entries[-1][1].append(text)
+                    loose_run = False
+            elif el.find_parent("li") is None:
+                # A <p> outside every list — loose text in the page body (the
+                # Dies Irae couplet trails the Faith page this way). Don't fuse
+                # it into the unrelated quote above; give it its own entry, and
+                # join consecutive loose lines since they form one passage.
+                text = own_text(el)
+                if text:
+                    if loose_run and entries:
+                        entries[-1][1].append(text)
+                    else:
+                        entries.append([0, [text]])
+                        loose_run = True
+            # else: inside an <li>, already captured by that item.
+    return [(lvl, "\n".join(parts)) for lvl, parts in entries]
+
+
 def read_blocks(path: Path) -> list[str]:
     """Legacy path: group flat paragraphs by indentation (older export style)."""
     d = docx.Document(str(path))
@@ -179,18 +248,22 @@ def build_markdown(blocks: list[str], title: str) -> tuple[str, int, int]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--docx", required=True)
+    ap.add_argument("--docx", help="path to a .docx export")
+    ap.add_argument("--html", help="path to a OneNote page HTML (from Graph API)")
     ap.add_argument("--title", default=None, help="defaults to the .docx filename")
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    src = Path(os.path.expanduser(args.docx))
+    if not (args.docx or args.html):
+        raise SystemExit("give --docx or --html")
+    src = Path(os.path.expanduser(args.html or args.docx))
     if not src.exists():
         raise SystemExit(f"not found: {src}")
     title = args.title or src.stem
 
-    # Prefer Word's real outline levels; fall back to indentation for older exports.
-    entries = read_outline(src)
+    # Prefer real structure: HTML <ol> nesting, else Word outline levels,
+    # else indentation. All three feed the same renderer.
+    entries = read_html_outline(src) if args.html else read_outline(src)
     if any(l is not None for l, _ in entries) and len({l for l, _ in entries}) > 1:
         body, stats = build_markdown_outline(entries, title)
         print(f"outline   : {stats['topics']} topics, {stats['quotes']} quotes, "
