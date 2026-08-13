@@ -36,12 +36,20 @@ done
 # ("Resource deadlock avoided") when bash reads a not-yet-materialised cloud file
 # after wake-from-sleep. Under `set -e` that single failure would abort the report.
 # Retry a few times so a transient lock doesn't kill the run.
-if [ -f .env ]; then
+# PREFER the local-disk copy (~/.config/seanipedia/.env), which cannot throw
+# EDEADLK; resilient_run.sh refreshes it from Drive whenever Drive is healthy.
+ENV_FILE=""
+if [ -f "$HOME/.config/seanipedia/.env" ]; then
+    ENV_FILE="$HOME/.config/seanipedia/.env"
+elif [ -f .env ]; then
+    ENV_FILE=".env"
+fi
+if [ -n "$ENV_FILE" ]; then
     set -a
     sourced=0
     for attempt in 1 2 3 4 5; do
         # shellcheck disable=SC1091
-        if source .env 2>/dev/null; then sourced=1; break; fi
+        if source "$ENV_FILE" 2>/dev/null; then sourced=1; break; fi
         echo "[WARN] .env source failed (attempt ${attempt}/5) — retrying in 3s..."
         sleep 3
     done

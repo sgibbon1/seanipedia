@@ -46,7 +46,14 @@ from dotenv import load_dotenv
 # with built-in token-usage logging.
 from llm import complete
 
-load_dotenv(override=True)
+# Secrets: LOCAL disk first (~/.config/seanipedia/.env), Drive copy as fallback.
+# Reading .env off the Google Drive mount is what killed the 2026-08-12 scheduled
+# run — Drive returns EDEADLK when the placeholder isn't hydrated, and this read
+# happens at import, before any retry logic. resilient_run.sh keeps the local
+# copy in sync whenever Drive is healthy. See daily_brief/daily_brief.py.
+_LOCAL_ENV = Path.home() / ".config" / "seanipedia" / ".env"
+load_dotenv(dotenv_path=_LOCAL_ENV if _LOCAL_ENV.exists() else Path(__file__).parent / ".env",
+            override=True)
 
 VAULT_PATH        = Path(os.environ.get("VAULT_PATH", "./vault"))
 OUTBOX_DIR        = VAULT_PATH / "_outbox"
