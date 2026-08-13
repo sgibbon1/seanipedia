@@ -173,7 +173,25 @@ def _inject_todays_jobs(out_path: Path, today: date) -> None:
 
 
 def _apply_carryover(out_path: Path, inbox_dir: Path) -> None:
-    """If brief_carryover.md exists, inject its unread items into Today.md and delete it."""
+    """If brief_carryover.md exists, inject its unread items into Today.md and delete it.
+
+    `parse()`'s own carryover step (see "Brief carryover" below) already does the
+    hard work: it splits yesterday's brief into blocks, keeps only the unchecked
+    ones, and re-attaches each block's `###`/`####` heading (which sits ABOVE its
+    checkbox in the source) to the right block. So brief_carryover.md arrives here
+    already clean — unchecked-only, headings correctly attached.
+    This function used to re-parse that file itself, splitting on `- [ ]`/`- [x]`
+    lines and treating any 2-space-indented following line as part of the same
+    item. That indentation rule matched the OLD per-email brief format
+    (`_format_email_block` in daily_brief.py), which indents every summary line.
+    The current trend-synthesis format (daily_brief_v2.py) writes flush-left prose
+    with no indentation, so the old logic hit the first unindented prose line,
+    decided the item had ended there, and dumped the rest — including the next
+    block's heading — into a generic "other" bucket. That's how a topic's
+    `### Topic` / `#### Overview` heading ended up detached from its own checkbox
+    and prose. Since parse() already guarantees unchecked-only + correct headings,
+    there's nothing left to re-parse — just pass the file through.
+    """
     carryover_path = inbox_dir / "brief_carryover.md"
     if not carryover_path.exists():
         return
@@ -182,53 +200,14 @@ def _apply_carryover(out_path: Path, inbox_dir: Path) -> None:
 
     date_m = re.search(r"<!-- carryover_date: (.+?) -->", raw)
     date_label = date_m.group(1) if date_m else "previous day"
-    raw_body = re.sub(r"<!--.*?-->\n?", "", raw)
-
-    lines = raw_body.splitlines()
-    segments: list[tuple[str, str]] = []
-    current: list[str] = []
-    in_item = False
-
-    for line in lines:
-        if re.match(r"^- \[[ x]\] ", line):
-            if current:
-                segments.append(("other", "\n".join(current)))
-                current = []
-            in_item = True
-            current = [line]
-        elif in_item and (line.startswith("  ") or line == ""):
-            current.append(line)
-        else:
-            if in_item:
-                segments.append(("item", "\n".join(current).rstrip()))
-                current = []
-                in_item = False
-            current.append(line)
-    if current:
-        segments.append(("item" if in_item else "other", "\n".join(current).rstrip()))
-
-    kept: list[str] = []
-    skip_next = False
-    for seg_type, content in segments:
-        if seg_type == "item":
-            if content.startswith("- [x]"):
-                skip_next = True
-                continue
-            kept.append(content)
-            skip_next = False
-        else:
-            cleaned = re.sub(r"(---\s*\n?){2,}", "---\n", content.strip()).strip()
-            if cleaned and not skip_next:
-                kept.append(cleaned)
-            skip_next = False
+    body = re.sub(r"<!--.*?-->\n?", "", raw).strip()
 
     carryover_path.unlink()
 
-    if not kept:
+    if not body:
         print("  Brief carryover: all items read — nothing to inject.")
         return
 
-    body = re.sub(r"\n{3,}", "\n\n", "\n\n".join(kept)).strip()
     n_unread = len(re.findall(r"^- \[ \]", body, re.MULTILINE))
     section = f"\n---\n\n## Daily Intelligence Brief\n\n*{n_unread} unread from {date_label}*\n\n{body}\n"
 
