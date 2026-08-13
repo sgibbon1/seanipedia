@@ -662,9 +662,30 @@ def parse(today: date):
 
     # ── 8. Brief carryover — save unchecked items for tomorrow ────────────
     if brief_body:
-        # Each email is a "- [ ]" or "- [x]" block; split on those markers
-        blocks = re.split(r"(?=^- \[[ x]\] )", brief_body, flags=re.MULTILINE)
-        unchecked = [b.strip() for b in blocks if b.strip().startswith("- [ ]")]
+        # Each email is a "- [ ]" or "- [x]" block; split on those markers.
+        # A block's ### / #### heading + --- divider sit ABOVE its checkbox,
+        # so a plain split lands them at the END of the PRECEDING block
+        # instead of the start of their own (and the very first heading,
+        # having no preceding block, was dropped outright). Peel any
+        # trailing heading/divider lines off each raw block and carry them
+        # into the front of the next one so re-injected items keep theirs.
+        raw_blocks = re.split(r"(?=^- \[[ x]\] )", brief_body, flags=re.MULTILINE)
+        blocks: list[str] = []
+        carried_heading = ""
+        for raw in raw_blocks:
+            lines = raw.splitlines()
+            split_at = len(lines)
+            while split_at > 0 and (
+                re.match(r"^#{1,6}\s+\S", lines[split_at - 1])
+                or lines[split_at - 1].strip() in ("---", "")
+            ):
+                split_at -= 1
+            blocks.append(carried_heading + "\n".join(lines[:split_at]))
+            trailing = "\n".join(lines[split_at:])
+            carried_heading = trailing + "\n" if trailing else ""
+        # A block may now start with a carried-forward heading rather than the
+        # checkbox itself, so check for the unchecked box anywhere in it.
+        unchecked = [b.strip() for b in blocks if re.search(r"^- \[ \] ", b, re.MULTILINE)]
         if unchecked:
             carryover_path = INBOX_DIR / "brief_carryover.md"
             date_label = note_date.strftime("%B %-d")
