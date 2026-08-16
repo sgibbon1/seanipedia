@@ -66,6 +66,18 @@ def _strip_frontmatter(text: str) -> str:
     return text
 
 
+# Obsidian block-ID markers written by quotes_blockids.py, e.g. "… one." ^5c568eeb.
+# They MUST be invisible to this parser: a marker left in the text changes the
+# quote's content hash — which is its identity — silently re-keying the whole
+# ledger and (measured) collapsing 1,334 quotes to 1,267 as re-hashed entries
+# collided. Strip them before any parsing happens.
+_BLOCKID_MARK_RE = re.compile(r"[ \t]+\^[A-Za-z0-9-]+[ \t]*$", re.MULTILINE)
+
+
+def _strip_block_ids(text: str) -> str:
+    return _BLOCKID_MARK_RE.sub("", text)
+
+
 def _normalize(s: str) -> str:
     """Canonical form for hashing — so smart/straight quotes, whitespace, and
     unicode variants of the SAME quote produce the SAME id."""
@@ -321,7 +333,7 @@ def _looks_like_category(text: str, has_children: bool, indent: int,
 def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
     """Return (quotes, flagged) parsed from one markdown file."""
     try:
-        body = _strip_frontmatter(path.read_text(encoding="utf-8"))
+        body = _strip_block_ids(_strip_frontmatter(path.read_text(encoding="utf-8")))
     except Exception as exc:
         return [], [{"file": path.name, "text": f"<unreadable: {exc}>", "reason": "read-error"}]
 

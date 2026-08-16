@@ -24,7 +24,8 @@ from __future__ import annotations
 import argparse
 import json
 import random
-from datetime import date
+import re
+from datetime import date, datetime
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -89,23 +90,57 @@ def pick(quotes: list[dict], ledger: dict, count: int,
     return picked, ledger
 
 
-def format_quote(q: dict) -> str:
+BLOCKID_MAP_PATH = Path(__file__).parent / "quotes_blockids.json"
+
+
+def load_blockids() -> dict[str, str]:
+    """id -> vault-relative note path, written by quotes_blockids.py.
+
+    Absent or incomplete is fine: a quote without a marker falls back to a
+    topic-only label, so the Quotes section never shows a dead `#^id` anchor.
+    """
+    try:
+        return json.loads(BLOCKID_MAP_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def format_quote(q: dict, blockids: dict[str, str] | None = None) -> str:
     """One quote as markdown. Multi-line quotes keep their line breaks (poetry
-    and stacked aphorisms are why the indexer preserves them)."""
+    and stacked aphorisms are why the indexer preserves them).
+
+    The topic becomes a BLOCK LINK back to the exact line in the source page
+    when we have a marker for it — Obsidian jumps to and highlights the quote,
+    rather than dumping you at the top of a 600-line page.
+    """
+    blockids = blockids if blockids is not None else {}
     body = "\n".join(f"> {line}" if line.strip() else ">"
                      for line in q["text"].splitlines())
     tail = []
     if q.get("author"):
         tail.append(f"— {q['author']}")
-    if q.get("topic"):
-        tail.append(f"*{q['topic']}*")
+    note = blockids.get(q.get("id", ""))
+    label = q.get("subtopic") or q.get("topic")
+    # Daily-archive quotes are topic'd by their filename (20260425); show a
+    # readable date instead of an eight-digit number.
+    if label and re.fullmatch(r"\d{8}", label):
+        try:
+            label = datetime.strptime(label, "%Y%m%d").strftime("%b %-d, %Y")
+        except ValueError:
+            pass
+    if note and label:
+        # Alias keeps the display text short — the path is long and Greek.
+        tail.append(f"[[{note}#^{q['id']}|{label}]]")
+    elif label:
+        tail.append(f"*{label}*")
     if tail:
         body += f"\n> {'  ·  '.join(tail)}"
     return body
 
 
 def render(picked: list[dict]) -> str:
-    return "\n\n".join(format_quote(q) for q in picked)
+    blockids = load_blockids()
+    return "\n\n".join(format_quote(q, blockids) for q in picked)
 
 
 def main() -> None:
