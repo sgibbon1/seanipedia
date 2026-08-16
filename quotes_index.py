@@ -340,6 +340,7 @@ def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
     quotes, flagged = [], []
     topic_from_file = path.stem
     current_subject: str | None = None
+    subject_indent = -1        # indent of the line that set current_subject
 
     # Table-formatted collections (Sententiae Antiquae) carry Source / English /
     # original-language in one row and need their own reader — the generic block
@@ -365,7 +366,20 @@ def parse_file(path: Path, collection: str) -> tuple[list[dict], list[dict]]:
 
         if _looks_like_category(text, has_children, indent, path.stem):
             current_subject = text.rstrip(":")
+            subject_indent = indent
             continue
+
+        # A subtopic covers only the items NESTED UNDER its category line. Once
+        # the list returns to the category's own level the grouping is over —
+        # those are siblings, not children. Without this the subject persisted
+        # until the next category, so "7. John Ikenberry on Power" claimed the
+        # 38 items that merely FOLLOWED it in Power.md, Napoleon included.
+        #
+        # A single `subject_indent` (rather than a stack) is sufficient only
+        # because _looks_like_category requires indent == 0, so categories never
+        # nest. If that ever changes, this must become a stack.
+        if current_subject is not None and indent <= subject_indent:
+            current_subject = None
 
         clean, author = _split_attrib(text)
         entry = {
