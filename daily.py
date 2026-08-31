@@ -648,7 +648,18 @@ def parse(today: date):
         # having no preceding block, was dropped outright). Peel any
         # trailing heading/divider lines off each raw block and carry them
         # into the front of the next one so re-injected items keep theirs.
-        raw_blocks = re.split(r"(?=^- \[[ x]\] )", brief_body, flags=re.MULTILINE)
+        #
+        # Split ONLY on "Reviewed" checkboxes, not "Flag" ones. Each subsection
+        # now carries BOTH a Reviewed box and a Flag box (daily_brief_v2.py's
+        # _tracker_boxes), immediately adjacent with no heading/divider between
+        # them. Splitting on every checkbox line treated Reviewed and Flag as
+        # two SEPARATE carry-forward items — Reviewed (with the heading, no
+        # body) as one, Flag+prose (with no heading) as another — and joining
+        # those two "items" with the "\n\n---\n\n" separator below put a stray
+        # "---" directly between Reviewed and Flag in every carried section.
+        # Reviewed is the actual per-subsection review gate; Flag rides inside
+        # the same block rather than being its own carry unit.
+        raw_blocks = re.split(r"(?=^- \[[ x]\] Reviewed\b)", brief_body, flags=re.MULTILINE)
         blocks: list[str] = []
         carried_heading = ""
         for raw in raw_blocks:
@@ -664,7 +675,12 @@ def parse(today: date):
             carried_heading = trailing + "\n" if trailing else ""
         # A block may now start with a carried-forward heading rather than the
         # checkbox itself, so check for the unchecked box anywhere in it.
-        unchecked = [b.strip() for b in blocks if re.search(r"^- \[ \] ", b, re.MULTILINE)]
+        # Gate specifically on REVIEWED, not "any unchecked box" — Flag is an
+        # independent marker (may sit unchecked, or checked, regardless of
+        # whether the section has been reviewed) and shouldn't by itself force
+        # a reviewed section back into tomorrow's carryover. Matches
+        # daily_brief_v2.py's own collect_carryover(), which gates the same way.
+        unchecked = [b.strip() for b in blocks if re.search(r"^- \[ \] Reviewed\b", b, re.MULTILINE)]
         if unchecked:
             carryover_path = INBOX_DIR / "brief_carryover.md"
             date_label = note_date.strftime("%B %-d")
