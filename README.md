@@ -144,6 +144,8 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 | ## Daily Intelligence Brief | written by `daily_brief_v2.py` at 5 PM; `--parse` copies it to `archive/Daily Intelligence Brief/YYYYMMDD.md` — not `_outbox`, never feeds wiki/weekly reports |
 | ## Jobs | written by `scrape_jobs.py` at 6:15 AM — not routed by `--parse` |
 
+`## Quotes` holds two things: whatever you write during the day, and the quotes resurfaced each morning from the lifetime collection below a `*From the archive*` divider. Only what sits **above** that divider is archived — no marker needed, just put it above the line. Everything from the divider down is there for rereading and is left untouched.
+
 Note: `_journal/` (the four perennial Calendar-of-Wisdom sections) is **read into** the weekly report for context — the week's Sententiae Antiquae and new Words land in *Quotes & Reading*, and the Calendar-of-Wisdom/Al-Anon readings inform *Personal Insights*. But `_journal/` is **never archived or fed to wiki synthesis**: it remains a permanent personal record, separate from the `_outbox/` staging layer. Only `_outbox/` content is synthesized into `__wiki/` and moved to `archive/`.
 
 ---

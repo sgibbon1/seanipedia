@@ -324,10 +324,12 @@ def generate(today: date):
 
     # Resurfaced quotes from the lifetime collection (quotes_index.json, dealt by
     # quotes_daily as a shuffled deck so every saved quote comes back around).
-    # These are for REREADING and are NOT re-archived: --parse only routes quotes
-    # marked "(new)", which is how a genuinely new capture is flagged. Without
-    # that split, injected quotes would be re-archived, re-indexed, and resurface
-    # in a feedback loop that also corrupts the daily-capture record.
+    # These are for REREADING and are NOT re-archived. The split is POSITIONAL:
+    # everything ABOVE the "*From the archive*" divider is Sean's own capture and
+    # gets routed out by --parse; everything from the divider down is resurfaced
+    # and is left alone. Without that split, injected quotes would be re-archived,
+    # re-indexed, and resurface in a feedback loop that also corrupts the
+    # daily-capture record.
     quotes_block = "\n\n"
     try:
         import quotes_daily
@@ -336,8 +338,8 @@ def generate(today: date):
             quotes_daily.DEFAULT_COUNT)
         if picked:
             quotes_daily.save_ledger(ledger)
-            quotes_block = ("\n*From the archive — mark anything new you add with "
-                            "(new).*\n\n" + quotes_daily.render(picked) + "\n\n")
+            quotes_block = ("\n*From the archive*\n\n"
+                            + quotes_daily.render(picked) + "\n\n")
     except SystemExit:
         pass          # index not built yet — leave the section empty
     except Exception as exc:
@@ -468,39 +470,39 @@ def _write_outbox_page(directory: Path, ymd: str, date_full: str, body: str,
 
 
 def _extract_new_quotes(quotes_text: str) -> str:
-    """Return only the quote lines marked '(new)', with the marker stripped.
+    """Return the quotes Sean added himself: everything ABOVE the archive divider.
 
-    Mirrors the ## Words convention: mark a genuinely new capture with (new)
-    anywhere on its line and it gets archived to _outbox/Quotes. Everything else
-    in the section (the morning's resurfaced quotes, the instruction line) is
-    left alone — see the call site for why re-archiving them would be harmful.
-    A multi-line quote should carry (new) on its first line; following indented
-    or blockquote lines are kept with it.
+    POSITION is the signal, not a marker. The section has two halves — whatever
+    Sean writes during the day sits at the top, and the quotes quotes_daily
+    resurfaces each morning sit below the "*From the archive*" line. Only the top
+    half is routed to _outbox/Quotes; re-archiving the injected ones would
+    re-index them and feed them back into tomorrow's deck.
+
+    This used to require tagging a quote "(new)", which silently dropped anything
+    Sean pasted in without the tag — if he saved it, he meant to keep it. Leftover
+    "(new)" markers from that era are stripped so old notes still parse cleanly.
     """
     out: list[str] = []
-    capturing = False
     for line in quotes_text.splitlines():
         stripped = line.strip()
-        # Skip the injected instruction line — it mentions "(new)" itself and
-        # would otherwise archive itself every single day.
+        # The divider ends Sean's half. Matched loosely (any italic line
+        # mentioning "archive") so notes written under the older, wordier
+        # divider still split at the right place.
         if stripped.startswith("*") and stripped.endswith("*") and "archive" in stripped.lower():
-            capturing = False
-            continue
-        if "(new)" in line.lower():
-            cleaned = re.sub(r"\(new\)", "", line, flags=re.IGNORECASE).rstrip()
-            if cleaned.strip():
-                out.append(cleaned)
-            capturing = True
-            continue
-        if capturing:
-            # Keep continuation lines of a multi-line new quote; a blank line or
-            # a new top-level line ends it.
-            if line.strip() and (line.startswith((" ", "\t", ">"))):
-                out.append(line.rstrip())
-            else:
-                capturing = False
+            break
+        # Belt and braces: a resurfaced quote always carries a backlink into
+        # _sources/. If the divider is ever missing or reworded, this still stops
+        # us re-archiving the injected block — the failure that would corrupt the
+        # lifetime collection.
+        if "[[_sources/" in line:
+            # The backlink is the LAST line of a resurfaced quote, so its
+            # blockquote body is already in `out`. Unwind it, or the fallback
+            # would archive the very block it exists to protect.
+            while out and (not out[-1].strip() or out[-1].lstrip().startswith(">")):
+                out.pop()
+            break
+        out.append(re.sub(r"\s*\(new\)", "", line, flags=re.IGNORECASE).rstrip())
     return "\n".join(out).strip()
-
 
 def _append_new_words(words_text: str, today: date) -> None:
     """Append words marked '(new)' to _words.md with continuing numbering.
@@ -599,8 +601,11 @@ def parse(today: date):
     # morning from the lifetime archive for rereading) and anything Sean adds
     # that day. Archiving the whole section would re-archive the resurfaced ones,
     # which then get re-indexed and resurface again — a feedback loop that also
-    # corrupts the record of what was actually captured when. So, mirroring the
-    # ## Words → _words.md convention, only lines marked "(new)" are routed out.
+    # corrupts the record of what was actually captured when. The split is
+    # POSITIONAL: everything above the "*From the archive*" divider is Sean's own
+    # and gets routed out; the divider and everything below it stays put. (## Words
+    # still uses the "(new)" marker — quotes dropped it because an untagged quote
+    # was being silently discarded.)
     quotes_body = sections.get("Quotes", "")
     new_quotes = _extract_new_quotes(quotes_body)
     if new_quotes:
