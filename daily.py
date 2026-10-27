@@ -33,14 +33,26 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# The year-stacked _journal/MM-DD.md format lives in its own module so the
+# nightly parse and the one-time migration can't drift apart.
+import journal_years
+
 # Secrets: LOCAL disk first (~/.config/seanipedia/.env), Drive copy as fallback.
 # Reading .env off the Google Drive mount is what killed the 2026-08-12 scheduled
 # run — Drive returns EDEADLK when the placeholder isn't hydrated, and this read
 # happens at import, before any retry logic. resilient_run.sh keeps the local
 # copy in sync whenever Drive is healthy. See daily_brief/daily_brief.py.
 _LOCAL_ENV = Path.home() / ".config" / "seanipedia" / ".env"
+# A VAULT_PATH already in the environment WINS over the .env, so a run can be
+# pointed at a throwaway copy of the vault for testing. It used to lose to
+# override=True, which meant a "sandbox" run silently parsed the real vault —
+# consuming the real Today.md. Everything else still overrides, because stale
+# exports of API keys and paths are what override=True exists to defeat.
+_ENV_VAULT_PATH = os.environ.get("VAULT_PATH")
 load_dotenv(dotenv_path=_LOCAL_ENV if _LOCAL_ENV.exists() else Path(__file__).parent / ".env",
             override=True)
+if _ENV_VAULT_PATH:
+    os.environ["VAULT_PATH"] = _ENV_VAULT_PATH
 
 VAULT_PATH        = Path(os.environ.get("VAULT_PATH", "./vault"))
 NATSEC_DB_PATH    = os.environ.get("NATSEC_DB_PATH", "")
@@ -576,19 +588,27 @@ def parse(today: date):
             journal_sections[key] = match
 
     if any(journal_sections.values()):
-        month_day = note_date.strftime("%B %-d")
-        parts = [f"# {month_day}\n"]
-        for heading, key in SECTION_MAP.items():
-            body_text = journal_sections.get(key, "").strip().rstrip("---").strip()
-            if body_text:
-                parts.append(f"## {heading}\n\n{body_text}\n\n---")
-
-        journal_body = "\n".join(parts).rstrip() + "\n"
+        # _journal/MM-DD.md is perennial — keyed by calendar day, because the
+        # practice follows A Calendar of Wisdom's fixed day-by-day readings. Once
+        # the collection passes a year (it lapped 2026-10-27) the day's file
+        # already holds an earlier year's entry, so we SET THIS YEAR'S BLOCK and
+        # leave the others alone. The old code wrote the file outright, which
+        # would have erased last year's entry a day at a time.
         JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
-        mm_dd = note_date.strftime("%m-%d")
-        journal_path = JOURNAL_DIR / f"{mm_dd}.md"
-        journal_path.write_text(frontmatter + journal_body, encoding="utf-8")
-        print(f"  Journal: {journal_path.name}")
+        journal_path = JOURNAL_DIR / note_date.strftime("%m-%d.md")
+        existing = journal_path.read_text(encoding="utf-8") if journal_path.exists() else None
+        try:
+            journal_text = journal_years.upsert_year_block(
+                existing, note_date.year, note_date.strftime("%B %-d"), journal_sections)
+        except journal_years.JournalFormatError as exc:
+            # Loud failure, no write: an unreadable file keeps its content until
+            # a human looks at it. Everything else in the parse still runs.
+            print(f"  Journal: SKIPPED {journal_path.name} — {exc}")
+        else:
+            journal_path.write_text(journal_text, encoding="utf-8")
+            years = ", ".join(str(y) for y in
+                              sorted(journal_years.parse_year_blocks(journal_text), reverse=True))
+            print(f"  Journal: {journal_path.name} (years: {years})")
 
         words_text = journal_sections.get("words", "")
         if words_text and "(new)" in words_text.lower():
@@ -608,7 +628,10 @@ def parse(today: date):
     # was being silently discarded.)
     quotes_body = sections.get("Quotes", "")
     new_quotes = _extract_new_quotes(quotes_body)
-    if new_quotes:
+    # _has_content, not a bare truthiness test: a Quotes section Sean left empty
+    # still yields the section's trailing "---" rule, which used to be archived
+    # as a one-line quote page.
+    if _has_content(new_quotes):
         _write_outbox_page(QUOTES_DIR, ymd, date_full, new_quotes)
         print(f"  Quotes: {ymd}.md ({new_quotes.count(chr(10)) + 1} new line(s))")
 

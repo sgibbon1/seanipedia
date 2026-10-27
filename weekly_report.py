@@ -46,6 +46,9 @@ from dotenv import load_dotenv
 # with built-in token-usage logging.
 from llm import complete
 
+# Year-stacked _journal/MM-DD.md format (one ## YYYY block per year).
+import journal_years
+
 # Secrets: LOCAL disk first (~/.config/seanipedia/.env), Drive copy as fallback.
 # Reading .env off the Google Drive mount is what killed the 2026-08-12 scheduled
 # run — Drive returns EDEADLK when the placeholder isn't hydrated, and this read
@@ -245,12 +248,16 @@ def _filter_completed_study(collected: dict[str, list[dict]]) -> dict[str, list[
 def _split_journal_sections(body: str) -> dict[str, str]:
     """Split a journal day's body into {section_heading: content}.
 
-    Journal files use level-2 headings (## A Calendar of Wisdom, ## Al-Anon, …)
-    separated by '---' rules. Returns only the JOURNAL_SECTIONS that have content.
+    Sections sit at ### inside a year block (### A Calendar of Wisdom, ### Al-Anon,
+    …) since the journal became year-stacked on 2026-10-27; ## is still accepted
+    so a hand-written or pre-migration file still parses. The JOURNAL_SECTIONS
+    filter is what keeps a "## 2025" year heading from being read as a section.
+    Returns only the JOURNAL_SECTIONS that have content.
     """
     out: dict[str, str] = {}
-    # Match each "## Heading\n...content..." up to the next "## " or end of text.
-    for m in re.finditer(r"^##\s+(.+?)\s*$\n(.*?)(?=^##\s+|\Z)", body, re.MULTILINE | re.DOTALL):
+    # Match each "### Heading\n...content..." up to the next heading or end of text.
+    for m in re.finditer(r"^#{2,3}\s+(.+?)\s*$\n(.*?)(?=^#{2,3}\s+|\Z)", body,
+                         re.MULTILINE | re.DOTALL):
         heading = m.group(1).strip()
         if heading not in JOURNAL_SECTIONS:
             continue
@@ -264,11 +271,12 @@ def _split_journal_sections(body: str) -> dict[str, str]:
 def collect_journal_for_week(week_start: date) -> dict[str, list[dict]]:
     """Collect the perennial-journal entries for the Sun–Sat week beginning week_start.
 
-    Journal files are _journal/MM-DD.md (one per calendar day, year in the
-    frontmatter date_full). We read each day in the week, confirm the entry's
-    year matches the week (defensive — the files are perennial and may hold
-    other years in future), and return {section: [{date, content}]} keyed by the
-    four JOURNAL_SECTIONS. These feed the report ONLY — never wiki or archive.
+    Journal files are _journal/MM-DD.md (one per calendar day) and since
+    2026-10-27 each one STACKS the years it has, newest first, under a "## YYYY"
+    heading — see journal_years.py. We take only the block for the week's own
+    year, so last year's entry for the same calendar day never leaks into this
+    week's report, and return {section: [{date, content}]} keyed by the four
+    JOURNAL_SECTIONS. These feed the report ONLY — never wiki or archive.
     """
     week_end = week_start + timedelta(days=6)
     collected: dict[str, list[dict]] = {}
@@ -280,11 +288,20 @@ def collect_journal_for_week(week_start: date) -> dict[str, list[dict]]:
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
-        # Confirm this file's entry is for the week's year (frontmatter date_full).
-        ym = re.search(r"date_full:\s*\"?[A-Za-z]+ \d{1,2},\s*(\d{4})", text)
-        if ym and int(ym.group(1)) != week_start.year:
-            continue
-        body = re.sub(r"^---\n.*?\n---\n", "", text, count=1, flags=re.DOTALL)
+        blocks = journal_years.parse_year_blocks(text)
+        if blocks:
+            # Year-stacked file: read this week's year only, and nothing if the
+            # day wasn't journalled this year.
+            body = blocks.get(week_start.year, "")
+            if not body:
+                continue
+        else:
+            # Pre-migration (flat) file: the whole body is one year's entry, so
+            # fall back to the frontmatter year check.
+            ym = re.search(r"date_full:\s*\"?[A-Za-z]+ \d{1,2},\s*(\d{4})", text)
+            if ym and int(ym.group(1)) != week_start.year:
+                continue
+            body = journal_years.strip_frontmatter(text)
         for section, content in _split_journal_sections(body).items():
             collected.setdefault(section, []).append(
                 {"date": d_iso, "filename": path.name, "content": content})

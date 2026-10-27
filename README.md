@@ -132,10 +132,10 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 
 | Section | Destination |
 |---|---|
-| ## A Calendar of Wisdom | `_journal/MM-DD.md` |
-| ## Al-Anon | `_journal/MM-DD.md` |
-| ## Sententiae Antiquae | `_journal/MM-DD.md` |
-| ## Words | `_journal/MM-DD.md` (+ new words → `_words.md`) |
+| ## A Calendar of Wisdom | `_journal/MM-DD.md` → `## <year>` block |
+| ## Al-Anon | `_journal/MM-DD.md` → `## <year>` block |
+| ## Sententiae Antiquae | `_journal/MM-DD.md` → `## <year>` block |
+| ## Words | `_journal/MM-DD.md` → `## <year>` block (+ new words → `_words.md`) |
 | ## Quotes | `_outbox/Quotes/YYYYMMDD.md` |
 | ## Daily Study | `_outbox/Daily Study/YYYYMMDD.md` — when a topic is scheduled, the section carries a `- [ ] Completed` box; check it off once done. Every day is archived, but `weekly_report.py` only credits **checked** days in the wiki/report (unchecked = assigned-but-skipped; legacy days with no box still count). |
 | ## Notes | `_outbox/Notes/YYYYMMDD.md` |
@@ -145,6 +145,22 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 | ## Jobs | written by `scrape_jobs.py` at 6:15 AM — not routed by `--parse` |
 
 `## Quotes` holds two things: whatever you write during the day, and the quotes resurfaced each morning from the lifetime collection below a `*From the archive*` divider. Only what sits **above** that divider is archived — no marker needed, just put it above the line. Everything from the divider down is there for rereading and is left untouched.
+
+#### `_journal/` stacks years
+
+`_journal/` is keyed by **calendar day** (`MM-DD.md`), not by full date, because the practice follows *A Calendar of Wisdom*'s fixed day-by-day readings — October 27 is the same passage every year. The collection lapped on **2026-10-27** (parser-written entries covered Apr 21–Oct 26 2026; the OneNote-era import covered Oct 27 2025–Apr 20 2026), so each day's file now holds **one `## YYYY` block per year, newest first**, with the four sections at `###` inside it:
+
+```
+# October 27
+## 2026
+### A Calendar of Wisdom      ← this year
+### Al-Anon
+---
+## 2025
+### A Calendar of Wisdom      ← last year, same passage
+```
+
+Open the day and you see every year's response to one reading side by side. `--parse` **sets this year's block and leaves the others alone** (`journal_years.upsert_year_block`), and refuses to write at all if it can't parse the file — the old code wrote the whole file, which would have erased last year's entry one night at a time. `weekly_report.py` reads only the block for the week's own year. The one-time conversion of the 312 pre-existing flat files was `migrate_journal_years.py` (run 2026-10-27; `--apply` to write, dry run by default).
 
 Note: `_journal/` (the four perennial Calendar-of-Wisdom sections) is **read into** the weekly report for context — the week's Sententiae Antiquae and new Words land in *Quotes & Reading*, and the Calendar-of-Wisdom/Al-Anon readings inform *Personal Insights*. But `_journal/` is **never archived or fed to wiki synthesis**: it remains a permanent personal record, separate from the `_outbox/` staging layer. Only `_outbox/` content is synthesized into `__wiki/` and moved to `archive/`.
 
