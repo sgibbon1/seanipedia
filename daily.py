@@ -675,6 +675,21 @@ def parse(today: date):
 
     # ── 8. Brief carryover — save unchecked items for tomorrow ────────────
     if brief_body:
+        # Drop the run-report sections that close every brief. They describe
+        # THIS run — which emails were filtered as off-domain, which were
+        # already read before it started, what's on the events calendar — and
+        # tomorrow's run writes its own from fresh data (events come back from
+        # daily_brief_v2's events_store.json regardless). Carrying them meant
+        # brief_carryover.md was mostly yesterday's 108-email coverage dump,
+        # and 6am re-injected it into the new note, where it read as today's.
+        # "Upcoming Events" carries a Reviewed box, so it formed a carry block
+        # of its own and dragged the two box-less sections below it along as
+        # trailing content; daily_brief_v2's own collect_carryover() ignores
+        # all three (it keeps topic sections only), so this just aligns the
+        # note with what actually feeds tomorrow's brief.
+        brief_body = re.split(
+            r"^#{1,6}\s+(?:Upcoming Events|Coverage|Read Before This Run)\b",
+            brief_body, maxsplit=1, flags=re.MULTILINE)[0].rstrip()
         # Each email is a "- [ ]" or "- [x]" block; split on those markers.
         # A block's ### / #### heading + --- divider sit ABOVE its checkbox,
         # so a plain split lands them at the END of the PRECEDING block
