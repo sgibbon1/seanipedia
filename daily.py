@@ -475,6 +475,12 @@ def _write_outbox_page(directory: Path, ymd: str, date_full: str, body: str,
     title = f"{date_full}{' — ' + topic if topic else ''}"
     if path.exists():
         existing = path.read_text(encoding="utf-8")
+        # Appending is for a day that legitimately produced two entries (e.g. a
+        # second study topic). A VERBATIM repeat means the same note was parsed
+        # twice — a backup trigger, or a note regenerated after a parse — so skip
+        # it rather than filing the same brief or notes page twice.
+        if body.strip() in existing:
+            return path
         path.write_text(existing.rstrip() + f"\n\n---\n\n{body.strip()}\n", encoding="utf-8")
     else:
         path.write_text(f"# {title}\n\n{body.strip()}\n", encoding="utf-8")
