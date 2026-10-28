@@ -263,6 +263,41 @@ def refresh_study(today: date):
         print("Study heading already populated — nothing to do.")
 
 
+def _on_this_day(note_date: date) -> str:
+    """Prior years' journal entries for this calendar day, newest year first.
+
+    The perennial journal is keyed by calendar day (see journal_years.py), so
+    once the practice laps, _journal/MM-DD.md already holds what Sean wrote on
+    this day in earlier years — against the same Calendar of Wisdom reading.
+    Prepending it to the daily note puts last year's response in front of him
+    before he writes this year's.
+
+    Read-only: this is a COPY of text that lives in _journal/, and the section
+    heading is deliberately not one of SECTION_MAP's four, so `--parse` ignores
+    it rather than routing it back into the journal and duplicating it a year
+    at a time. The journal's sections sit at ###, so they nest at #### under
+    their year here.
+    """
+    path = JOURNAL_DIR / note_date.strftime("%m-%d.md")
+    if not path.exists():
+        return ""
+    try:
+        blocks = journal_years.parse_year_blocks(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"  (on this day: skipped — {exc})")
+        return ""
+    prior = {y: b for y, b in blocks.items() if y < note_date.year and b.strip()}
+    if not prior:
+        return ""
+    parts = ["## On This Day", ""]
+    for year in sorted(prior, reverse=True):
+        body = re.sub(r"^### ", "#### ", prior[year], flags=re.MULTILINE)
+        parts += [f"### {year}", "", body, ""]
+    years = ", ".join(str(y) for y in sorted(prior, reverse=True))
+    print(f"  On This Day: {note_date:%B %-d} from {years}")
+    return "\n".join(parts) + "\n---\n"
+
+
 def generate(today: date):
     out_path = INBOX_DIR / "Today.md"
 
@@ -375,6 +410,10 @@ def generate(today: date):
         study_heading = "## Daily Study"
         study_context = "\n\n"
 
+    # Last year's entry for this same calendar day, prepended so the past
+    # reading is in front of him before he writes today's (see _on_this_day).
+    on_this_day = _on_this_day(today)
+
     content = f"""---
 date_sort: "{sort_date}"
 date_display: "{month_day}"
@@ -383,7 +422,7 @@ type: journal
 sections: [tolstoy, alanon, sententiae, words, quotes, study, notes, reflections, therapy]
 ---
 # {month_day}
-## [A Calendar of Wisdom]({tolstoy_url})
+{on_this_day}## [A Calendar of Wisdom]({tolstoy_url})
 
 
 ---

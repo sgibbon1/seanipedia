@@ -162,6 +162,12 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 
 Open the day and you see every year's response to one reading side by side. `--parse` **sets this year's block and leaves the others alone** (`journal_years.upsert_year_block`), and refuses to write at all if it can't parse the file — the old code wrote the whole file, which would have erased last year's entry one night at a time. `weekly_report.py` reads only the block for the week's own year. The one-time conversion of the 312 pre-existing flat files was `migrate_journal_years.py` (run 2026-10-27; `--apply` to write, dry run by default).
 
+#### `## On This Day` — the lapped years, prepended
+
+Since the journal laps (above), `--generate` now opens the daily note with what you wrote on this same calendar day in earlier years, newest first, under `## On This Day` — against the same Calendar of Wisdom reading, so last year's response is in front of you before you write this year's. The journal's `###` sections nest at `####` under their year.
+
+It is a READ-ONLY copy of text that already lives in `_journal/`. The heading is deliberately not one of the four routed sections, so `--parse` ignores it instead of routing it back and duplicating the entry a year at a time.
+
 Note: `_journal/` (the four perennial Calendar-of-Wisdom sections) is **read into** the weekly report for context — the week's Sententiae Antiquae and new Words land in *Quotes & Reading*, and the Calendar-of-Wisdom/Al-Anon readings inform *Personal Insights*. But `_journal/` is **never archived or fed to wiki synthesis**: it remains a permanent personal record, separate from the `_outbox/` staging layer. Only `_outbox/` content is synthesized into `__wiki/` and moved to `archive/`.
 
 ---
