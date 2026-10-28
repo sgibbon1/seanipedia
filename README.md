@@ -28,7 +28,8 @@ Scripts live in:
 Vault lives in:
 `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/vault/`
 
-🟢 = calls an external API (Claude) — costs money / requires internet
+🟢 = calls an external LLM API (Gemini via REST, `AI_PROVIDER=gemini`; `llm.py` can switch back to Claude) — costs money / requires internet
+🔁 = has backup triggers: launchd fires it three times a day and `~/scripts/resilient_run.sh` makes the later ones no-ops once a run succeeds
 ⏰ = runs automatically via launchd
 👤 = you run it manually
 
@@ -65,9 +66,9 @@ the comment at the top of that file before using it as-is.
 ### Daily note
 > **Created by:** `daily.py --generate` (via `com.seang.daily-generate`) at **6:00am daily**
 
-1. **Open today's note** — it lives at `_inbox/Today.md`. Pin a shortcut or use Obsidian's Quick Open to jump to it.
+1. **Open today's note** — it lives at `_inbox/Today.md`. Pin a shortcut or use Obsidian's Quick Open to jump to it. If you journalled this calendar day in an earlier year, the note opens with `## On This Day` — last year's response to the same Calendar of Wisdom reading (see below).
 2. **Write throughout the day** — fill in `## Notes`, `## Quotes`, `## Daily Study`, `## Reflections`, etc. as things come up. When a study topic is scheduled, `## Daily Study` has a `- [ ] Completed` checkbox — tick it off once you've actually done the work so it counts in the weekly report.
-3. **Do nothing at 3:00am** — `daily.py --parse` reads `Today.md`, routes each section to `_outbox/` using the date from frontmatter, and deletes the file.
+3. **Do nothing at 3:00am** — `daily.py --parse` reads `Today.md`, routes each section to `_journal/` or `_outbox/` using the date from frontmatter, saves the brief's unreviewed sections to `_inbox/brief_carryover.md` for the morning, and deletes the file.
 
 ### Email notes on the go
 Email yourself at your configured `MAIL_ACCOUNT` (see **Setup** below) with subject `For Notes: <topic>`. The noon `email_scan.py` job picks it up and appends it to today's `_inbox/Today.md` under `## Notes` (which `--parse` routes to `_outbox/Notes/YYYYMMDD.md` at 3am, like any other section). Past-dated emails are written straight to `_outbox/Notes/` since that day's note is gone.
@@ -84,6 +85,11 @@ python3 daily.py --generate                  # manually generate today's note
 python3 daily.py --refresh                   # re-populate Daily Study if Calendar was slow
 python3 email_scan.py --dry-run              # preview email scan without writing
 python3 weekly_report.py --dry-run           # preview weekly report without writing
+
+# Test against a COPY of the vault, never the real one. An explicit VAULT_PATH
+# in the environment wins over the .env (it didn't before 2026-10-27, and a
+# "sandbox" --parse consumed the real Today.md).
+VAULT_PATH=/tmp/vault-copy python3 daily.py --parse
 ```
 
 ---
@@ -91,41 +97,54 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 ## Data Flow
 
 ```
-  daily_brief_v2.py 🟢 ⏰ (5pm)   email_scan.py ⏰ (noon)   scrape_jobs.py ⏰ (6:15am)   daily.py --generate ⏰ (6am)
-         │                            │                         │                               │
-         │ ## Daily Intelligence      │ ## Notes                │ ## Jobs                       ▼
-         │ Brief                      │ (For Notes emails)      │                     _inbox/Today.md
-         └────────────────────────────┴─────────────────────────┴────────────────────────►  (daily workspace)
-                                               │
-                              daily.py --parse ⏰ (3am)
-                                               │
-                    ┌──────────┬──────────┬────┴─────┬──────────┬──────────┐
-                    ▼          ▼          ▼           ▼          ▼          ▼
-               _journal/  _outbox/   _outbox/    _outbox/   _outbox/   _outbox/
-               MM-DD.md   Quotes/    Daily Study/ Therapy/  Reflec-    Notes/
-             (Calendar,   YYYYMMDD   YYYYMMDD     YYYYMMDD  tions/     YYYYMMDD
-              Al-Anon,                                       YYYYMMDD
-              Sententiae,
-              Words)
-                    │
-                    └──► _words.md  (Words entries marked "(new)")
+  daily.py --parse ⏰🔁 (3am)                     daily.py --generate ⏰🔁 (6am)
+  consumes YESTERDAY's Today.md                  creates TODAY's Today.md from:
+          │                                        ▲
+          ├──► _inbox/brief_carryover.md ──────────┤  yesterday's unreviewed brief topics
+          │     (consumed + deleted at 6am)        │
+          │                                        │
+          ├──► _journal/MM-DD.md ──────────────────┤  earlier years' block → ## On This Day
+          │    (one ## YYYY block per year)        │
+          │                                        │
+          │    quotes_index + quotes_ledger ───────┤  3 quotes below *From the archive*
+          │    Calendar (STUDY_CALENDAR) ──────────┤  ## Daily Study topic
+          │    natsec_jobs SQLite ─────────────────┘  ## Today's Jobs
+          │
+          │    written into Today.md during the day:
+          │      daily.py --refresh ⏰🔁 (8am)    ## Daily Study, if Calendar was slow
+          │      scrape_jobs.py ⏰🔁 (9am)        ## Today's Jobs (natsec_jobs)
+          │      email_scan.py ⏰🔁 (noon)        ## Notes ("For Notes" mail)
+          │      daily_brief_v2.py 🟢⏰🔁 (5pm)   ## Daily Intelligence Brief
+          │                                       (runs email_scan again first)
+          │
+          └─ routes each section of yesterday's note:
+                ┌──────────┬──────────┬──────────┬──────────┬──────────┐
+                ▼          ▼          ▼          ▼          ▼          ▼
+           _journal/   _outbox/   _outbox/   _outbox/   _outbox/   _outbox/
+           MM-DD.md    Quotes/    Daily      Therapy/   Reflec-    Notes/
+           ## <year>   YYYYMMDD   Study/     YYYYMMDD   tions/     YYYYMMDD
+           block                  YYYYMMDD              YYYYMMDD
+             │
+             └──► _words.md   (Words entries marked "(new)")
 
   ## Daily Intelligence Brief ──► archive/Daily Intelligence Brief/YYYYMMDD.md
-                                   (permanent copy; NOT _outbox — never feeds
-                                   __wiki/ or _weekly reports/)
+                                  (full brief incl. run report; NOT _outbox —
+                                  never feeds __wiki/ or _weekly reports/)
 
-  ┌─────────────────────────────────────────────────────────────────┐
-  │  _outbox/ (synthesized+archived) + _journal/ (read for report only)│
-  └──────────────────────┬──────────────────────────────────────────┘
-                         │
-             weekly_report.py  🟢 ⏰ (daily 9am; reports completed Sun–Sat weeks)
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ _outbox/ (synthesized, then archived) + _journal/ (read for the       │
+  │ report — the week's own year block only)                              │
+  └───────────────────────────────┬──────────────────────────────────────┘
+                                  │
+             weekly_report.py 🟢⏰🔁 (daily 9am; reports completed Sun–Sat weeks)
                     │           │           │
                     ▼           ▼           ▼
-                 __wiki/   _weekly      macOS
-               (updated)   reports/   notification
-                           YYYYMMDD    🔔
+                 __wiki/    _weekly       macOS
+               (updated)    reports/   notification 🔔
+                            YYYYMMDD     │
+                                         └─ moves processed _outbox/ files to archive/
 
-  scrape_jobs.py also sends macOS notification 🔔 after each daily run (6:15am)
+  archive/Quotes/ ──► quotes_index.py ──► back into the 6am quote deal
 ```
 
 ### Daily note sections → destinations
@@ -141,8 +160,9 @@ python3 weekly_report.py --dry-run           # preview weekly report without wri
 | ## Notes | `_outbox/Notes/YYYYMMDD.md` |
 | ## Reflections | `_outbox/Reflections/YYYYMMDD.md` (verbatim) |
 | ## Therapy | `_outbox/Therapy/YYYYMMDD.md` |
-| ## Daily Intelligence Brief | written by `daily_brief_v2.py` at 5 PM; `--parse` copies it to `archive/Daily Intelligence Brief/YYYYMMDD.md` — not `_outbox`, never feeds wiki/weekly reports |
-| ## Jobs | written by `scrape_jobs.py` at 6:15 AM — not routed by `--parse` |
+| ## Daily Intelligence Brief | written by `daily_brief_v2.py` at 5 PM. `--parse` copies the WHOLE section to `archive/Daily Intelligence Brief/YYYYMMDD.md` (not `_outbox`, never feeds wiki/weekly reports), and saves each topic subsection whose `Reviewed` box is still unticked to `_inbox/brief_carryover.md`. The run-report sections at the end — Upcoming Events, Coverage, Read Before This Run — are **not** carried: they describe that one run, and tomorrow's brief writes its own. |
+| ## Today's Jobs | written by `scrape_jobs.py` (natsec_jobs) at 9 AM — not routed by `--parse` |
+| ## On This Day | written by `--generate` from earlier years' `_journal/` blocks — a read-only copy, **not routed** by `--parse` |
 
 `## Quotes` holds two things: whatever you write during the day, and the quotes resurfaced each morning from the lifetime collection below a `*From the archive*` divider. Only what sits **above** that divider is archived — no marker needed, just put it above the line. Everything from the divider down is there for rereading and is left untouched.
 
@@ -178,17 +198,18 @@ Note: `_journal/` (the four perennial Calendar-of-Wisdom sections) is **read int
 
 | Script | Purpose | Schedule |
 |---|---|---|
-| `daily.py --generate` ⏰ | Creates today's `_inbox/Today.md` with all sections pre-filled from calendar. | 6:00am daily |
-| `daily.py --refresh` ⏰ | Re-populates `## Daily Study` if the 6am run fired before Calendar synced. | 8:00am daily |
-| `daily.py --parse` ⏰ | Routes each section to `_journal/` or `_outbox/`; appends new Words to `_words.md`; deletes the inbox file. | 3:00am daily |
-| `email_scan.py` ⏰ | Scans Mail for unread "For Notes" messages; appends body to today's `Today.md` `## Notes` section (or `_outbox/Notes/YYYYMMDD.md` for past-dated / missing-note cases); marks read. | noon daily |
-| `daily_brief_v2.py` 🟢 ⏰ | Fetches ND alumni inbox (everything unread since the last brief — a time window, not a keyword pre-filter), routes each email with Claude, then writes ONE trend-synthesis narrative per topic (not one block per email), saves `output/brief_YYYY-MM-DD.md`, inserts `## Daily Intelligence Brief` into `Today.md`. Marks read only what it verifiably summarized; off-domain and personal mail is left unread on purpose. See **Daily Brief** below for the full model. | 5:00pm daily |
+| `daily.py --generate` ⏰🔁 | Creates today's `_inbox/Today.md`: `## On This Day` from earlier years' journal, the section skeleton with today's Calendar of Wisdom / Al-Anon links, three resurfaced quotes, the Daily Study topic from Calendar, yesterday's unreviewed brief items (from `brief_carryover.md`), and today's jobs. | 6:00am daily |
+| `daily.py --refresh` ⏰🔁 | Re-populates `## Daily Study` if the 6am run fired before Calendar synced. | 8:00am daily |
+| `daily.py --parse` ⏰🔁 | Routes each section to `_journal/` (this year's block) or `_outbox/`; appends new Words to `_words.md`; archives the brief and writes `brief_carryover.md`; deletes the inbox file. A verbatim repeat of an outbox page is skipped, so a double parse can't file anything twice. | 3:00am daily |
+| `email_scan.py` ⏰🔁 | Scans Mail for unread "For Notes" messages; appends body to today's `Today.md` `## Notes` section (or `_outbox/Notes/YYYYMMDD.md` for past-dated / missing-note cases); marks read. | noon daily |
+| `daily_brief_v2.py` 🟢⏰🔁 | Fetches the ND alumni inbox (everything unread since the last brief — a time window, not a keyword pre-filter), routes each email with the LLM, writes ONE trend-synthesis narrative per topic, folds in yesterday's unreviewed sections, compresses the whole to ~3,500 words, saves `output/brief_YYYY-MM-DD.md`, inserts `## Daily Intelligence Brief` into `Today.md`. Marks read only what it verifiably summarized; off-domain and personal mail is left unread on purpose. See **Daily Brief** below. | 5:00pm daily |
+| `scrape_jobs.py` ⏰🔁 | (sibling `natsec_jobs/`) scrapes the job boards, dedupes in SQLite, injects `## Today's Jobs`, sends a 🔔 notification. | 9:00am daily |
 
 ### Weekly (automated via launchd)
 
 | Script | Purpose | Schedule |
 |---|---|---|
-| `weekly_report.py` 🟢 ⏰ | Reports each completed **Sun–Sat** week that doesn't yet have a report: reads that week's `_outbox/`, updates `__wiki/`, generates the report, saves to `_weekly reports/`, archives processed files. Idempotent — tracks the last reported week in `logs/.last_reported_week`, so it's safe to run any day, any number of times, and catches up missed weeks (one report each). | daily 9am (+ wake/login) |
+| `weekly_report.py` 🟢⏰🔁 | Reports each completed **Sun–Sat** week that doesn't yet have a report: reads that week's `_outbox/`, updates `__wiki/`, generates the report, saves to `_weekly reports/`, archives processed files. Idempotent — tracks the last reported week in `logs/.last_reported_week`, so it's safe to run any day, any number of times, and catches up missed weeks (one report each). | daily 9am (+ wake/login) |
 
 ```bash
 python3 weekly_report.py                   # report all completed-but-missing weeks (idempotent)
@@ -197,20 +218,34 @@ python3 weekly_report.py --no-wiki         # skip wiki updates, report only
 python3 weekly_report.py --dry-run         # preview without writing
 ```
 
+### Supporting modules and one-time scripts
+
+| File | What |
+|---|---|
+| `journal_years.py` | The year-stacked `_journal/MM-DD.md` format: parse a day's `## YYYY` blocks, set one year's block (idempotent), refuse to write a file it can't parse. Shared by `daily.py`, `weekly_report.py` and the migration so they can't disagree. |
+| `migrate_journal_years.py` 👤 | One-time (run 2026-10-27) conversion of the 312 flat journal files into year blocks. Dry run by default; `--apply` to write; `--only 10-27` for one day. Safe to re-run — already-stacked files are skipped. |
+| `quotes_index.py` / `quotes_blockids.py` / `quotes_daily.py` | Build the lifetime quote index (with `^id` block anchors in the source pages), and deal three not-yet-shown quotes into each morning's `## Quotes`, tracked in `quotes_ledger.json` so the deck cycles through everything before repeating. |
+| `sync_readme.py` 👤 | Copies this README into the vault twin (`_inbox/README.md`), keeping the two deliberate differences: no Setup section in the vault, and the vault's own personal "For Notes" addresses (the repo is public). Edit the repo copy, then run it; `--check` reports drift. |
+| `llm.py` | Provider-agnostic completion (Gemini or Anthropic, chosen by `AI_PROVIDER`) with token-usage logging. |
+
 ---
 
 ## Automation (launchd)
 
-| Job | Script | Schedule | Log |
+| Job | Script | Triggers 🔁 | Log |
 |---|---|---|---|
-| `com.seang.daily-generate` | `daily.py --generate` ⏰ | 6:00am daily | `~/Library/Logs/daily-generate.log` |
-| `com.seang.daily-refresh` | `daily.py --refresh` ⏰ | 8:00am daily | `~/Library/Logs/daily-refresh.log` |
-| `com.seang.daily-parse` | `daily.py --parse` ⏰ | 3:00am daily | `~/Library/Logs/daily-parse.log` |
-| `com.seang.email-scan` | `email_scan.py` ⏰ | noon daily | `~/Library/Logs/email-scan.log` |
-| `com.seang.daily-brief` | `~/scripts/run_daily_brief.sh` → `daily_brief_v2.py` 🟢 ⏰ | 5:00pm daily | `~/scripts/daily_brief_launchd.log` |
-| `com.seang.weekly-report` | `run_weekly.sh` → `weekly_report.py` 🟢 ⏰ | daily 9am + wake + login | `~/Library/Logs/weekly-report.log` |
+| `com.seang.daily-parse` | `daily.py --parse` | 3:00, 4:30, 6:00am | `~/Library/Logs/daily-parse.log` |
+| `com.seang.daily-generate` | `daily.py --generate` | 6:00, 7:30, 9:00am | `~/Library/Logs/daily-generate.log` |
+| `com.seang.daily-refresh` | `daily.py --refresh` | 8:00, 9:30, 11:00am | `~/Library/Logs/daily-refresh.log` |
+| `com.sean.natsecjobs` | `natsec_jobs/run_daily.sh` | 9:00, 10:30am, noon | `~/Library/Logs/natsec-jobs.launchd.log` |
+| `com.seang.email-scan` | `email_scan.py` | noon, 1:30, 3:00pm | `~/Library/Logs/email-scan.log` |
+| `com.seang.daily-brief` | `daily_brief/run_daily_brief.sh` → `email_scan.py`, then `daily_brief_v2.py` 🟢 | 5:00, 6:30, 8:00pm | `~/Library/Logs/daily-brief-detail.log` (script) · `~/scripts/daily_brief_launchd.log` (wrapper) |
+| `com.seang.weekly-report` | `run_weekly.sh` → `weekly_report.py` 🟢 | 9:00, 10:30am, noon (+ wake/login) | `~/Library/Logs/weekly-report.log` |
+| `com.seang.git-autocommit` | `git_autocommit.sh` | 11:30, 11:45, 11:55pm | — |
 
-All jobs fire on wake if the machine was asleep at the scheduled time.
+Every job runs through `~/scripts/resilient_run.sh` (local disk, not versioned), which is what makes three triggers safe: once a job succeeds, later triggers that day are no-ops (`RR_FORCE=1` overrides); each attempt warms the project's files off the Drive mount first, retries at 2, 10 and 30 minutes, and syncs the project's `.env` to `~/.config/<project>/.env` — scripts read that local copy first, because reading `.env` off an unhydrated Drive placeholder is what killed the 2026-08-12 run. launchd also fires a missed trigger once on wake.
+
+Original plists from before the backup triggers are kept in `~/scripts/plist-backup-2026-08-12/`.
 
 To reload a job after editing its plist:
 ```bash
@@ -226,37 +261,48 @@ launchctl load   ~/Library/LaunchAgents/com.seang.<name>.plist
 
 **The model (trend-synthesis, replaced the per-email version 2026-07-28):**
 1. **Fetch** — everything unread since the last brief ran (a TIME window, not a fixed count or a keyword pre-filter — a busy day just gets fully covered, however many emails that is).
-2. **Route** (Claude, cheap/batched) — for each email: relevant? which of the 5 topics (or "Other")? is it announcing an event? is it personal/professional correspondence rather than a subscribed publication?
-3. **Synthesize** (Claude, one call per topic) — ONE trend-focused narrative per topic aggregating all of today's emails on it, plus the last few days' coverage for "building / continuing / fading" context — not a per-email block. Every relevant email is guaranteed a mention: either cited inline or, if the synthesis didn't work it in, listed under an auto-appended "### Also noted".
-4. **Assemble** — topic sections (each with a per-subsection `- [ ] Reviewed` checkbox that keeps re-appearing in tomorrow's brief until checked), an events list, and two audit sections: **Coverage** (every email routed non-relevant, so the filter itself is checkable) and **personal/professional** mail (never summarized, never marked read — it's your own correspondence to answer).
-5. **Mark read** — ONLY email that's actually verifiable in the brief just written (relevant → synthesized). Off-domain (Coverage) and personal mail are deliberately left unread — they're your own inbox to-do list, the brief must not touch them.
+2. **Route** (LLM, batched) — for each email: relevant? which of the six topics? is it announcing an event? is it personal/professional correspondence rather than a subscribed publication? The topics, in order: *Artificial Intelligence & Other Emerging Technologies* (with Ukraine Defense Tech as a standing subsection), *United States National Security Policy*, *China & Indo-Pacific Competition*, *Geopolitics & Geoeconomics*, *Russia, Ukraine & Eastern Europe*, *Other National Security*.
+3. **Synthesize** (one call per topic) — ONE trend-focused narrative per topic aggregating everything in the window, merged with that topic's **unreviewed** sections from the previous brief (the carry-forward). Trends emerge only across briefs you haven't checked off — there is no look-back over older archived briefs (`recent_context` was removed 2026-09; a ~40k-word-per-topic look-back is the noted fallback if that ever proves too short). Every relevant email is guaranteed a mention: cited inline or listed under an auto-appended "Also noted". Prompts require real dates ("on Oct 27"), never "today".
+4. **Compress** — the topic sections are cut to `BRIEF_WORD_CAP` (2,800 counted words, which lands near ~3,500 readable ones), split half fresh / half carried (`FRESH_SHARE=0.5`), with each topic's budget blended from fixed `TOPIC_WEIGHTS` and its actual volume. A small backlog is topped up with fresh intel to reach the cap. Links are masked as `⟦L#⟧` tokens during compression so the model can't mangle a URL. Guards keep the **uncompressed** section rather than ship damage — if compression thins the citations, or if the output is cut off mid-sentence — and unmasking repairs the two known model habits: wrapping a citation in a code span, and dropping a token's closing bracket.
+5. **Assemble** — each topic subsection gets two labelled boxes, `- [ ] Reviewed — <name>` and `- [ ] Flag — <name>`. Labels must be unique because the Obsidian Tasks plugin finds a task by its line text, so identical lines can't be ticked on the phone. **Reviewed** is the carry-forward gate; **Flag** marks something to re-read and doesn't hold a section back. Then the run report: **Upcoming Events** (merged across issues in `output/events_store.json`), **Coverage** (every email routed non-relevant, so the filter itself is checkable), personal/professional mail (never summarized, never marked read), and **Read Before This Run**.
+6. **Mark read** — ONLY email that's verifiably in the brief just written. Off-domain (Coverage) and personal mail are deliberately left unread — they're your own inbox to-do list.
+
+**The carry-forward loop:** at 3am `--parse` writes every topic subsection whose `Reviewed` box is still unticked to `_inbox/brief_carryover.md`; at 6am `--generate` injects it into the new note and deletes the file; at 5pm the brief merges those items into its fresh synthesis. A section keeps coming back until you tick it. The file only exists between 3am and 6am on a normal day.
 
 Two more sections can appear when relevant:
 - **"⚠ Flagged — Left Unread (Safety Check)"** — a structural belt-and-suspenders check: if an email was ever judged relevant but somehow didn't make it into a synthesized section, it's listed here and explicitly NOT marked read, rather than trusting the normal-case guarantee blindly.
-- **"Read Before This Run (Trusted Sources)"** — reading an email directly in Gmail (opening it yourself) marks it read before the script ever sees it, so `is:unread` silently skips it — it's never routed, never in Coverage, never anywhere. This section catches the curated `TRUSTED_SENDERS` subset of that blind spot (WOTR, TLDR AI, Jamestown, etc.) with a cheap sender-match scan, so a trusted newsletter you happened to open yourself doesn't just vanish with zero trace. Ordinary already-read inbox traffic (shopping receipts, personal correspondence) is expected and not surfaced.
+- **"Read Before This Run (Trusted Sources)"** — reading an email directly in Gmail (opening it yourself) marks it read before the script ever sees it, so `is:unread` silently skips it — it's never routed, never in Coverage, never anywhere. This section catches the curated `TRUSTED_SENDERS` subset of that blind spot (WOTR, TLDR AI, Jamestown, etc.) with a cheap sender-match scan, so a trusted newsletter you happened to open yourself doesn't just vanish with zero trace. Ordinary already-read inbox traffic (shopping receipts, personal correspondence) is expected and not surfaced. The scan is skipped on runs with an explicit `--after`/`--before` window, where it would mostly list mail that earlier briefs marked read. *Example:* FT's "The AI Shift" lands on Thursdays and is usually opened on arrival, so since mid-August it has appeared here rather than in the prose — the router marks it relevant every time it actually sees it.
+
+**Clearing an unread backlog:** `python3 daily_brief_v2.py --after 2026/10/04 --limit 500 --mark-read --no-carry --no-vault --out-name backlog-2026-10-05_10-27 --title "Backlog Brief — October 5–27, 2026"`, then copy `output/brief_<name>.md` into `_inbox/`. Gmail's `after:D` means D 00:00 onward, so use the day *before* the first day you want. Survey the count first — the default `--limit` is 400 — and expect Gmail's per-minute query quota to drop a few messages on a large fetch (they stay unread; the log names them). The 2026-10-27 run: 431 of 444 fetched, 133 briefed and marked read, three of six topics kept uncompressed by the guards (~8,500 words).
 
 **Catching up on already-read mail:** `python3 daily_brief_v2.py --include-read --after 2026/08/11` re-scans a window INCLUDING mail you already read yourself (not just what's still unread) and synthesizes it same as normal — but a retrospective run like this never marks anything read, since it's re-reading mail that's already been handled. Add `--out-name catchup-aug11 --no-vault` to write to a standalone file instead of overwriting today's dated brief / touching `Today.md`.
 
-Sample output:
+Sample output (as written to `output/`; inserted into `Today.md` one heading level deeper):
 
 ```
-# Daily Intelligence Brief — August 11, 2026
-*Generated 17:01 | 25 relevant of 55 emails spanning Aug 10–Aug 11 · trend synthesis*
+# Daily Intelligence Brief — October 27, 2026
 
-## Artificial Intelligence & Emerging Technology
-The dual trend of rapid AI innovation and escalating concerns regarding safety,
-control, and regulatory oversight continues to intensify...
+*Generated 12:10 | 150 relevant of 270 emails spanning Oct 20–Oct 27 · trend synthesis*
 
-### AI Safety, Autonomy, and Cybersecurity Incidents
-- [ ] Reviewed
-Concerns over AI models exhibiting unexpected autonomy are building
-significantly, continuing a trend from earlier this week... [POLITICO's Digital
-Future Daily](https://mail.google.com/...).
-...
+## United States National Security Policy
+### Overview
+- [ ] Reviewed — United States National Security Policy overview
+- [ ] Flag — United States National Security Policy overview
+
+U.S. national security policy increasingly integrates AI and autonomy into
+military capabilities [POLITICO's National Security Daily](message://…) …
+
+### Strategic Competition and Intelligence
+- [ ] Reviewed — Strategic Competition and Intelligence
+- [ ] Flag — Strategic Competition and Intelligence
+…
+## Upcoming Events (DC Metro & Virtual)
 ## Coverage
-<details><summary>27 email(s) filtered as off-domain (left unread, not surfaced)</summary>
-...
+<details><summary>108 email(s) filtered as off-domain (left unread …)</summary>
+## Read Before This Run (Trusted Sources)
 ```
+
+Citation links use the `message://` scheme, which opens the email in Apple Mail.
 
 **Useful flags** (`python3 daily_brief_v2.py --help` for the full list):
 
@@ -265,12 +311,13 @@ Future Daily](https://mail.google.com/...).
 | `--dry-run` | Preview only — writes `output/brief_preview_*.md`, marks nothing read. |
 | `--limit N` | Safety cap on messages fetched (default 400); the daily window is time-based, not count-based, so this is a backstop, not the normal control. |
 | `--backlog` | Big one-time catch-up (raises the cap, sub-batches synthesis); pair with `--mark-read` to actually clear it. |
+| `--mark-read` | Mark the briefed mail read even on a `--backlog` run (a normal run always does). |
 | `--before` / `--after YYYY/MM/DD` | Explicit Gmail-syntax date window instead of "since the last brief." |
 | `--include-read` | Retrospective — includes already-read mail, never marks anything read. |
 | `--out-name NAME` | Write to `output/brief_NAME.md` instead of today's date. |
 | `--no-vault` | Write the file only; skip the `Today.md` insert. |
 | `--no-carry` | Skip carrying forward unreviewed sections from the last brief. |
-| `--title` | Override the brief's H1 title. |
+| `--title` | Override the brief's H1 title (the `# ` is added if you leave it off). |
 
 One-time setup configures four things: Python packages, a Google Cloud app (Gmail/ND), a Microsoft Azure app (Graph/JHU), and the Anthropic key.
 
@@ -296,12 +343,13 @@ VAULT_TODAY_PATH=/abs/path/to/vault/_inbox/Today.md
 
 **Step 4 — one-time auth:** `python3 setup_auth.py` opens two browser windows (Google + Microsoft); sign into each with the matching alumni account. Tokens are saved to `credentials/` and refresh automatically.
 
-**Run / behavior:** `python3 daily_brief_v2.py`. The brief is inserted before `## Jobs` (or after `## Therapy`); re-running the same day REPLACES the whole `## Daily Intelligence Brief` section rather than merging into it, so a manual re-run the same day overwrites, it doesn't append. launchd runs it at 5pm via `~/scripts/run_daily_brief.sh`, which first runs `email_scan.py` (serializing Today.md writes) then the brief — a bash wrapper is required because `/bin/bash` needs Full Disk Access to reach the Google Drive path. (`daily_brief.py`, the v1 script this replaced, had its own separate up-to-7-day catch-up loop; v2 doesn't need one — its normal fetch window already covers everything unread since the last brief, however many days that spans.)
+**Run / behavior:** `python3 daily_brief_v2.py`. The brief is inserted before `## Today's Jobs` (or at the end of the note). Re-running on a day that already has a brief switches to a **same-day rescan**: it rebuilds the section from ALL of today's mail, read or unread, so late arrivals get folded in rather than a topic looking "done" after the first run — and boxes you've already ticked today stay ticked. launchd runs it at 5pm via `daily_brief/run_daily_brief.sh` (under `resilient_run.sh`), which waits for DNS, runs `email_scan.py` first (serializing `Today.md` writes), then the brief — a bash wrapper is required because `/bin/bash` needs Full Disk Access to reach the Google Drive path. (`daily_brief.py`, the v1 script this replaced, had its own separate up-to-7-day catch-up loop; v2 doesn't need one — its normal fetch window already covers everything unread since the last brief, however many days that spans.)
 
 **Troubleshooting:**
 - **Gmail auth fails / token expired:** delete `credentials/gmail_token.json`, re-run `setup_auth.py`.
 - **JHU auth fails:** delete `credentials/jhu_token.json`, re-run `setup_auth.py`. If sign-in is blocked, the Azure app may need consent — open `https://login.microsoftonline.com/common/adminconsent?client_id=YOUR_CLIENT_ID`.
 - **JHU emails not appearing:** v2 only fetches the ND Gmail inbox (`fetch_all_unread` in `daily_brief_v2.py`) — the JHU Graph path lives in `daily_brief.py` but v2 never calls it. Confirm this is actually still wanted before troubleshooting JHU auth.
+- **Formatting looks off in the brief** (raw `message://` URLs in grey code boxes, a stray `⟦L41`, a section ending mid-sentence): compression artifacts. Since 2026-10-27 unmasking peels code-spans off citations and re-closes cut-off tokens, the compressor has 3.2× token headroom, and a truncated section is replaced by its uncompressed original. If one still gets through, repair the archived copy, `Today.md`, *and* `brief_carryover.md` — the carryover holds its own copy of the same text until 6am.
 - **Nothing summarized despite relevant mail:** check `~/Library/Logs/daily-brief-detail.log` (the real log — `output/cron.log` is v1's, stale since the 2026-08-04 Drive-mount flush issue moved logging local). There's no keyword pre-filter in v2 — every fetched email goes to Claude's router, so a miss is either a routing call or something read before the fetch (see "Read Before This Run" above).
 - **An email is read but never showed up anywhere in the brief:** check the "Read Before This Run" section first — if you opened it yourself in Gmail before 5pm, that's expected (see the model above), not a bug. If it's not a trusted source and not in Coverage/personal either, that's the "⚠ Flagged" safety net catching something worth investigating.
 - **A trusted newsletter keeps getting missed (or never gets a real routing chance because you read it yourself):** add its sender substring → topic bucket to the `TRUSTED_SENDERS` dict at the top of `daily_brief.py` (v2 imports it as `db.TRUSTED_SENDERS`), e.g. `"newsletters@e.econo": "Economic Competition & Geopolitics"`. Trusted sources get a much deeper read at both routing and synthesis, and are also what "Read Before This Run" checks for.
@@ -312,8 +360,10 @@ VAULT_TODAY_PATH=/abs/path/to/vault/_inbox/Today.md
 
 - **`_inbox/Today.md` is your daily workspace** — always the same filename; `--parse` routes it to `_outbox/` at 3:00am using the date baked into its frontmatter.
 - **`_outbox/` is the staging layer** — every section of every day's note lands here as a dated file. Content is never lost.
+- **`_journal/` is perennial and year-stacked** — one file per calendar day, one `## YYYY` block per year. Nothing ever overwrites another year's block, and the writer refuses a file it can't parse rather than guessing.
+- **Test against a copy** — `VAULT_PATH=/path/to/copy python3 daily.py …` really does isolate a run; an explicit `VAULT_PATH` beats the `.env`.
 - **`__wiki/` pages are living documents** — synthesized knowledge rewritten weekly by `weekly_report.py`. Not append-only logs.
 - **Reflections are verbatim** — `_outbox/Reflections/` content is never synthesized or paraphrased, only cleaned up and appended.
 - **Email "For Notes"** — send from any address listed in your `SENDER_ADDRS` (see **Setup**) with subject `For Notes: <topic>`.
 - **`_words.md`** — running vocabulary list. Mark an entry in the daily `## Words` section with `(new)` to append it automatically.
-- **🟢 API spend** — `weekly_report.py` calls Claude twice (wiki synthesis + report generation). Everything else is local.
+- **🟢 API spend** — `daily_brief_v2.py` (routing, per-topic synthesis, compression, citation repair, event extraction) and `weekly_report.py` (wiki synthesis + report). `daily.py`, `email_scan.py` and the quote scripts are local.
