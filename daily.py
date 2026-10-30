@@ -24,10 +24,13 @@ _journal pages use MM-DD.md filenames.
 """
 
 import argparse
+import fcntl
 import os
 import re
 import sqlite3
 import subprocess
+import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -220,7 +223,9 @@ def _apply_carryover(out_path: Path, inbox_dir: Path) -> None:
         print("  Brief carryover: all items read — nothing to inject.")
         return
 
-    n_unread = len(re.findall(r"^- \[ \]", body, re.MULTILINE))
+    # Count REVIEWED boxes — each subsection also has a Flag box, so counting
+    # every "- [ ]" reported twice the real number ("76 unread" for 38).
+    n_unread = len(re.findall(r"^- \[ \] Reviewed\b", body, re.MULTILINE))
     section = f"\n---\n\n## Daily Intelligence Brief\n\n*{n_unread} unread from {date_label}*\n\n{body}\n"
 
     text = out_path.read_text(encoding="utf-8")
@@ -302,11 +307,22 @@ def generate(today: date):
     out_path = INBOX_DIR / "Today.md"
 
     if out_path.exists():
-        # Parse leftover note before creating today's (handles missed 3am run)
         raw = out_path.read_text(encoding="utf-8")
         stale_date = _get_note_date(raw, today - timedelta(days=1))
+        # Today's note already exists: a re-run, or a backup trigger after the
+        # first one succeeded. Regenerating would wipe whatever has been
+        # written in it AND deal three fresh quotes from the ledger, burning
+        # this morning's — so do nothing.
+        if stale_date == today:
+            print(f"Today.md for {today} already exists — nothing to generate.")
+            return
+        # Parse leftover note before creating today's (handles missed 3am run)
         print(f"Existing Today.md found (dated {stale_date}) — parsing before generating.")
         parse(stale_date)
+        if out_path.exists():
+            # parse() declined or failed — never overwrite an unparsed note.
+            print("  ⚠ leftover note was not parsed — leaving it in place, not generating.")
+            return
 
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -598,7 +614,7 @@ def _append_new_words(words_text: str, today: date) -> None:
     print(f"  Words: appended {len(new_entries)} new word(s) to _words.md")
 
 
-def parse(today: date):
+def parse(today: date, allow_today: bool = False):
     today_path = INBOX_DIR / "Today.md"
     stem       = today.strftime("%m-%d")
     dated_path = INBOX_DIR / f"{stem}.md"
@@ -615,6 +631,19 @@ def parse(today: date):
 
     # Use date from frontmatter so outbox filenames are always correct
     note_date = _get_note_date(raw, today)
+
+    # Parse closes out a FINISHED day. A note dated today was just created by
+    # --generate and is still being written in — consuming it deletes the
+    # day's workspace. That happened on 2026-10-30: the Mac slept through the
+    # 3:00 and 4:30 parse triggers, the 6:00 backup fired in the same minute as
+    # generate, and parse's retry two minutes later archived and deleted the
+    # freshly generated note. Refusing is a SUCCESS (exit 0), so
+    # resilient_run.sh doesn't keep retrying; --allow-today overrides for a
+    # deliberate same-day parse.
+    if note_date == date.today() and not allow_today:
+        print(f"{note_path.name} is dated today ({note_date}) — still in use, "
+              f"not parsing. (Use --allow-today to force.)")
+        return
     ymd       = note_date.strftime("%Y%m%d")
     date_full = note_date.strftime("%B %-d, %Y")
 
@@ -783,35 +812,82 @@ def parse(today: date):
             print("  Brief: all items marked read — nothing carried forward.")
 
     # ── Remove daily note from inbox ───────────────────────────────────────
-    note_path.unlink()
+    # missing_ok: if another process removed it after we read it, the work
+    # above is still done — crashing here is what turned the 10-30 race into a
+    # retry that ate the next day's note.
+    note_path.unlink(missing_ok=True)
     print(f"  Removed from inbox: {note_path.name}")
     print("\nParse complete.")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
 
+@contextmanager
+def _inbox_lock(timeout_s: int = 900):
+    """Exclusive lock on _inbox/.daily.lock for the duration of one job.
+
+    flock is released automatically if the process dies, so a crash can't
+    leave the inbox locked. Waits up to 15 minutes — longer than generate
+    plus its own pre-parse takes — then proceeds with a warning rather than
+    blocking the morning forever.
+    """
+    INBOX_DIR.mkdir(parents=True, exist_ok=True)
+    fh = open(INBOX_DIR / ".daily.lock", "w")
+    deadline = time.monotonic() + timeout_s
+    waited = False
+    while True:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if not waited:
+                print("  (another daily.py job is running — waiting for it)")
+                waited = True
+            if time.monotonic() > deadline:
+                print("  ⚠ lock wait timed out — proceeding anyway")
+                break
+            time.sleep(2)
+    try:
+        yield
+    finally:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        finally:
+            fh.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--generate", action="store_true",
                         help="Create today's daily note (run at 6am)")
     parser.add_argument("--parse", action="store_true",
-                        help="Route today's note content into the vault (run at 10pm)")
+                        help="Route yesterday's note into the vault and remove it (3am)")
     parser.add_argument("--refresh", action="store_true",
                         help="Re-populate the study heading from calendar (if 6am sync lagged)")
+    parser.add_argument("--allow-today", action="store_true",
+                        help="Let --parse consume a note dated today (normally refused)")
     parser.add_argument("--date", type=str, default=None,
                         help="Override date (YYYY-MM-DD), for testing")
     args = parser.parse_args()
 
     today = date.fromisoformat(args.date) if args.date else date.today()
 
-    if args.generate:
-        generate(today)
-    elif args.parse:
-        parse(today)
-    elif args.refresh:
-        refresh_study(today)
-    else:
+    if not (args.generate or args.parse or args.refresh):
         parser.print_help()
+        return
+
+    # One at a time. --generate, --parse and --refresh all read-modify-write
+    # _inbox/Today.md, and launchd fires every missed trigger at once when the
+    # Mac wakes — on 2026-10-30 parse and generate ran in the same second and
+    # each parsed yesterday's note. An exclusive lock makes the second wait for
+    # the first; the today's-note guard in parse() then makes waiting safe.
+    with _inbox_lock():
+        if args.generate:
+            generate(today)
+        elif args.parse:
+            parse(today, allow_today=args.allow_today)
+        elif args.refresh:
+            refresh_study(today)
 
 
 if __name__ == "__main__":

@@ -81,7 +81,8 @@ A report covering one completed **Sunday→Saturday** week lands in `vault/_week
 cd ~/Library/CloudStorage/GoogleDrive-.../Sean/Code/ai_code/seanipedia/
 
 python3 daily.py --parse --date 2026-04-28   # re-parse a specific date's inbox file
-python3 daily.py --generate                  # manually generate today's note
+python3 daily.py --generate                  # manually generate today's note (no-op if it exists)
+python3 daily.py --parse --allow-today       # deliberately close out TODAY's note early
 python3 daily.py --refresh                   # re-populate Daily Study if Calendar was slow
 python3 email_scan.py --dry-run              # preview email scan without writing
 python3 weekly_report.py --dry-run           # preview weekly report without writing
@@ -198,9 +199,9 @@ Note: `_journal/` (the four perennial Calendar-of-Wisdom sections) is **read int
 
 | Script | Purpose | Schedule |
 |---|---|---|
-| `daily.py --generate` ⏰🔁 | Creates today's `_inbox/Today.md`: `## On This Day` from earlier years' journal, the section skeleton with today's Calendar of Wisdom / Al-Anon links, three resurfaced quotes, the Daily Study topic from Calendar, yesterday's unreviewed brief items (from `brief_carryover.md`), and today's jobs. | 6:00am daily |
+| `daily.py --generate` ⏰🔁 | Creates today's `_inbox/Today.md`: `## On This Day` from earlier years' journal, the section skeleton with today's Calendar of Wisdom / Al-Anon links, three resurfaced quotes, the Daily Study topic from Calendar, yesterday's unreviewed brief items (from `brief_carryover.md`), and today's jobs. If yesterday's note is still there it parses it first; if **today's** note already exists it does nothing — regenerating would wipe what you've written and burn a fresh deal of quotes. | 6:00am daily |
 | `daily.py --refresh` ⏰🔁 | Re-populates `## Daily Study` if the 6am run fired before Calendar synced. | 8:00am daily |
-| `daily.py --parse` ⏰🔁 | Routes each section to `_journal/` (this year's block) or `_outbox/`; appends new Words to `_words.md`; archives the brief and writes `brief_carryover.md`; deletes the inbox file. A verbatim repeat of an outbox page is skipped, so a double parse can't file anything twice. | 3:00am daily |
+| `daily.py --parse` ⏰🔁 | Routes each section to `_journal/` (this year's block) or `_outbox/`; appends new Words to `_words.md`; archives the brief and writes `brief_carryover.md`; deletes the inbox file. A verbatim repeat of an outbox page is skipped, so a double parse can't file anything twice. **Refuses a note dated today** (exit 0 — that note is still in use; `--allow-today` overrides). | 3:00am daily |
 | `email_scan.py` ⏰🔁 | Scans Mail for unread "For Notes" messages; appends body to today's `Today.md` `## Notes` section (or `_outbox/Notes/YYYYMMDD.md` for past-dated / missing-note cases); marks read. | noon daily |
 | `daily_brief_v2.py` 🟢⏰🔁 | Fetches the ND alumni inbox (everything unread since the last brief — a time window, not a keyword pre-filter), routes each email with the LLM, writes ONE trend-synthesis narrative per topic, folds in yesterday's unreviewed sections, compresses the whole to ~3,500 words, saves `output/brief_YYYY-MM-DD.md`, inserts `## Daily Intelligence Brief` into `Today.md`. Marks read only what it verifiably summarized; off-domain and personal mail is left unread on purpose. See **Daily Brief** below. | 5:00pm daily |
 | `scrape_jobs.py` ⏰🔁 | (sibling `natsec_jobs/`) scrapes the job boards, dedupes in SQLite, injects `## Today's Jobs`, sends a 🔔 notification. | 9:00am daily |
@@ -245,6 +246,8 @@ python3 weekly_report.py --dry-run         # preview without writing
 
 Every job runs through `~/scripts/resilient_run.sh` (local disk, not versioned), which is what makes three triggers safe: once a job succeeds, later triggers that day are no-ops (`RR_FORCE=1` overrides); each attempt warms the project's files off the Drive mount first, retries at 2, 10 and 30 minutes, and syncs the project's `.env` to `~/.config/<project>/.env` — scripts read that local copy first, because reading `.env` off an unhydrated Drive placeholder is what killed the 2026-08-12 run. launchd also fires a missed trigger once on wake.
 
+**`daily.py` jobs never overlap.** `--parse`, `--generate` and `--refresh` all rewrite `Today.md`, and launchd fires every missed trigger at once when the Mac wakes. So each takes an exclusive lock on `_inbox/.daily.lock` (released automatically if the process dies; waits up to 15 minutes), and the second job in waits for the first. That's only safe *because* of the two guards above: parse declines a note dated today, and generate declines to overwrite one. On 2026-10-30, before these existed, the 6:00 parse backup fired in the same second as generate; both parsed yesterday's note, parse crashed, and its retry two minutes later archived and deleted the fresh October 30 note.
+
 Original plists from before the backup triggers are kept in `~/scripts/plist-backup-2026-08-12/`.
 
 To reload a job after editing its plist:
@@ -267,7 +270,7 @@ launchctl load   ~/Library/LaunchAgents/com.seang.<name>.plist
 5. **Assemble** — each topic subsection gets two labelled boxes, `- [ ] Reviewed — <name>` and `- [ ] Flag — <name>`. Labels must be unique because the Obsidian Tasks plugin finds a task by its line text, so identical lines can't be ticked on the phone. **Reviewed** is the carry-forward gate; **Flag** marks something to re-read and doesn't hold a section back. Then the run report: **Upcoming Events** (merged across issues in `output/events_store.json`), **Coverage** (every email routed non-relevant, so the filter itself is checkable), personal/professional mail (never summarized, never marked read), and **Read Before This Run**.
 6. **Mark read** — ONLY email that's verifiably in the brief just written. Off-domain (Coverage) and personal mail are deliberately left unread — they're your own inbox to-do list.
 
-**The carry-forward loop:** at 3am `--parse` writes every topic subsection whose `Reviewed` box is still unticked to `_inbox/brief_carryover.md`; at 6am `--generate` injects it into the new note and deletes the file; at 5pm the brief merges those items into its fresh synthesis. A section keeps coming back until you tick it. The file only exists between 3am and 6am on a normal day.
+**The carry-forward loop:** at 3am `--parse` writes every topic subsection whose `Reviewed` box is still unticked to `_inbox/brief_carryover.md`; at 6am `--generate` injects it into the new note (headed "*N unread from <date>*", counting sections, not checkboxes) and deletes the file; at 5pm the brief merges those items into its fresh synthesis. A section keeps coming back until you tick it. The file only exists between 3am and 6am on a normal day.
 
 Two more sections can appear when relevant:
 - **"⚠ Flagged — Left Unread (Safety Check)"** — a structural belt-and-suspenders check: if an email was ever judged relevant but somehow didn't make it into a synthesized section, it's listed here and explicitly NOT marked read, rather than trusting the normal-case guarantee blindly.
