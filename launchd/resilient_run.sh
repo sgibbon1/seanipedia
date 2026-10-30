@@ -60,6 +60,18 @@ notify() {  # $1 title, $2 message — best-effort; never fatal
 
 log "=== $LABEL start ==="
 
+# ── 0. Already succeeded today? ─────────────────────────────────────────────
+# Backup launchd triggers (see the plists: a primary time plus later retries)
+# exist so one bad Drive window doesn't cost a whole day. They must be no-ops
+# once the day's run has actually SUCCEEDED, which the stamp tells us.
+# RR_FORCE=1 overrides, for manual re-runs.
+if [ "${RR_FORCE:-0}" != "1" ] && [ -f "$STAMP" ]; then
+    if [ "$(date -r "$STAMP" +%F)" = "$(date +%F)" ]; then
+        log "already succeeded today — backup trigger no-op"
+        exit 0
+    fi
+fi
+
 # ── 1. Wait for the Drive-hosted script to be READABLE ──────────────────────
 # `-r` only checks permissions; a placeholder passes that and still fails to read.
 # Reading one byte is the honest test that Drive has materialised the file.
@@ -79,11 +91,54 @@ if [ "$readable" -ne 1 ]; then
     exit 1
 fi
 
+# ── 1b. WARM UP every other file the job will read ──────────────────────────
+# The 2026-08-12 daily-brief failure: this launcher proved run_daily_brief.sh was
+# readable, then python died reading .env — a DIFFERENT file, never gated. One
+# hydrated file says nothing about its neighbours. So touch them all: reading a
+# byte forces Drive to materialise each placeholder while we can still wait.
+# Best-effort by design — a cold unrelated module must not abort the run, and the
+# retry loop below is the real safety net.
+PROJ_DIR="$(cd "$(dirname "$TARGET")" && pwd)"
+PROJ="$(basename "$PROJ_DIR")"
+warm_fail=0
+for f in "$PROJ_DIR"/.env "$PROJ_DIR"/*.py "$PROJ_DIR"/*.sh; do
+    [ -f "$f" ] || continue
+    for w in 1 2 3; do
+        head -c 1 "$f" >/dev/null 2>&1 && break
+        [ "$w" -eq 3 ] && { log "warn: '$(basename "$f")' still not readable"; warm_fail=$((warm_fail+1)); }
+        sleep 5
+    done
+done
+[ "$warm_fail" -gt 0 ] && log "warm-up: $warm_fail file(s) never became readable"
+
+# ── 1c. Keep a LOCAL copy of the secrets ────────────────────────────────────
+# Scheduled jobs read ~/.config/<project>/.env first (local disk cannot throw
+# EDEADLK). Refresh it here whenever Drive is cooperating, so editing the Drive
+# .env stays the way secrets are managed and the local copy follows along. If
+# Drive is down, the existing local copy carries the run.
+if [ -f "$PROJ_DIR/.env" ] && head -c 1 "$PROJ_DIR/.env" >/dev/null 2>&1; then
+    mkdir -p "$HOME/.config/$PROJ"
+    if ! cmp -s "$PROJ_DIR/.env" "$HOME/.config/$PROJ/.env" 2>/dev/null; then
+        cp "$PROJ_DIR/.env" "$HOME/.config/$PROJ/.env" && \
+            chmod 600 "$HOME/.config/$PROJ/.env" && log "refreshed local .env copy"
+    fi
+fi
+
 # ── 2. Run the job, retrying the whole invocation ───────────────────────────
 # The target's own internals may still hit a transient Drive read; a fresh
 # invocation usually clears it, so retry the whole thing rather than fail the day.
+# Backoff must OUTLAST the outage, not sit inside it. The old 60s/120s spacing
+# put all three attempts in a 3-minute span (17:01–17:04 on 2026-08-12) — a Drive
+# hydration stall routinely runs longer than that, so every retry failed for the
+# same reason. 2min / 10min / 30min straddles a typical stall instead.
+RETRY_WAITS=(120 600 1800)
+# RR_ATTEMPTS caps the attempts (default 4). The morning chain runs under this
+# launcher with RR_ATTEMPTS=1: each of its steps already gets its own four
+# attempts, so retrying the whole chain on top would compound into hours of
+# waiting. A failed chain is retried by its next launchd trigger instead.
+ATTEMPTS="${RR_ATTEMPTS:-4}"
 rc=1
-for attempt in 1 2 3; do
+for attempt in $(seq 1 "$ATTEMPTS"); do
     log "run attempt $attempt"
     "${INTERP[@]}" "$TARGET" "${TARGET_ARGS[@]}" >> "$LOG" 2>&1
     rc=$?
@@ -93,12 +148,16 @@ for attempt in 1 2 3; do
         break
     fi
     log "run FAILED rc=$rc (attempt $attempt)"
-    [ $attempt -lt 3 ] && sleep $((attempt * 60))   # 60s, then 120s
+    if [ $attempt -lt "$ATTEMPTS" ]; then
+        wait_s=${RETRY_WAITS[$((attempt-1))]}
+        log "waiting ${wait_s}s before retry"
+        sleep "$wait_s"
+    fi
 done
 
 if [ $rc -ne 0 ]; then
     log "ERROR: all attempts failed (rc=$rc)"
-    notify "$LABEL failed" "All 3 attempts failed (exit $rc). See ~/Library/Logs/${LABEL}.log"
+    notify "$LABEL failed" "All $ATTEMPTS attempt(s) failed (exit $rc). See ~/Library/Logs/${LABEL}.log"
 fi
 
 # ── 3. Staleness watchdog ───────────────────────────────────────────────────

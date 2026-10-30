@@ -18,9 +18,12 @@ mkdir -p logs
 # api.anthropic.com must resolve before we bother running.
 echo "[INFO] Waiting 20s for DNS to stabilise after network reconnect..."
 sleep 20
-echo "[INFO] Checking DNS for api.anthropic.com..."
+# Check the host the LLM calls actually go to. This used to wait on
+# api.anthropic.com only, which stopped being the right host when the
+# pipeline moved to Gemini (AI_PROVIDER=gemini); either host now counts.
+echo "[INFO] Checking DNS for the LLM API (Gemini or Anthropic)..."
 for i in $(seq 1 60); do
-    if host api.anthropic.com > /dev/null 2>&1; then
+    if host generativelanguage.googleapis.com > /dev/null 2>&1 || host api.anthropic.com > /dev/null 2>&1; then
         echo "[INFO] DNS ready after $((20 + i * 5))s."
         break
     fi
