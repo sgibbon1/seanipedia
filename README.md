@@ -157,7 +157,7 @@ VAULT_PATH=/tmp/vault-copy python3 daily.py --parse
 | Section | Destination |
 |---|---|
 | ## A Calendar of Wisdom | `_journal/MM-DD.md` → `## <year>` block |
-| ## Al-Anon | `_journal/MM-DD.md` → `## <year>` block |
+| ## Al-Anon | `_journal/MM-DD.md` → `## <year>` block. The heading links to *Courage to Change*; the *One Day at a Time* link on the line beneath it is removed by `--parse`, so it never reaches the journal. |
 | ## Sententiae Antiquae | `_journal/MM-DD.md` → `## <year>` block |
 | ## Words | `_journal/MM-DD.md` → `## <year>` block (+ new words → `_words.md`) |
 | ## Quotes | `_outbox/Quotes/YYYYMMDD.md` |
@@ -203,7 +203,7 @@ Note: `_journal/` (the four perennial Calendar-of-Wisdom sections) is **read int
 
 | Script | Purpose | Schedule |
 |---|---|---|
-| `daily.py --generate` ⏰🔁 | Creates today's `_inbox/Today.md`: `## On This Day` from earlier years' journal, the section skeleton with today's Calendar of Wisdom / Al-Anon links, three resurfaced quotes, the Daily Study topic from Calendar, yesterday's unreviewed brief items (from `brief_carryover.md`), and today's jobs. If yesterday's note is still there it parses it first; if **today's** note already exists it does nothing — regenerating would wipe what you've written and burn a fresh deal of quotes. | ⛓ step 2 |
+| `daily.py --generate` ⏰🔁 | Creates today's `_inbox/Today.md`: `## On This Day` from earlier years' journal, the section skeleton with today's Calendar of Wisdom / Al-Anon / One Day at a Time links, three resurfaced quotes, the Daily Study topic from Calendar, yesterday's unreviewed brief items (from `brief_carryover.md`), and today's jobs. If yesterday's note is still there it parses it first; if **today's** note already exists it does nothing — regenerating would wipe what you've written and burn a fresh deal of quotes. | ⛓ step 2 |
 | `daily.py --refresh` ⏰🔁 | Re-populates `## Daily Study` if the morning run fired before Calendar synced. | 8:00am daily |
 | `daily.py --parse` ⏰🔁 | Routes each section to `_journal/` (this year's block) or `_outbox/`; appends new Words to `_words.md`; archives the brief and writes `brief_carryover.md`; deletes the inbox file. A verbatim repeat of an outbox page is skipped, so a double parse can't file anything twice. **Refuses a note dated today** (exit 0 — that note is still in use; `--allow-today` overrides). | ⛓ step 1 |
 | `email_scan.py` ⏰🔁 | Scans Mail for unread "For Notes" messages; appends body to today's `Today.md` `## Notes` section (or `_outbox/Notes/YYYYMMDD.md` for past-dated / missing-note cases); marks read. | noon daily |

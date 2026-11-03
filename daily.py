@@ -384,6 +384,12 @@ def generate(today: date):
         f"https://dailyponderables.com/{month_slug}-{day_num}"
         f"-courage-to-change-{today.year}/"
     )
+    # Reading aid only: --parse strips this line (see _strip_reading_links), so
+    # the link never reaches the journal.
+    one_day_url = (
+        f"https://dailyponderables.com/{month_slug}-{day_num}"
+        f"-one-day-at-a-time-in-al-anon-{today.year}/"
+    )
 
     # Resurfaced quotes from the lifetime collection (quotes_index.json, dealt by
     # quotes_daily as a shuffled deck so every saved quote comes back around).
@@ -443,6 +449,7 @@ sections: [tolstoy, alanon, sententiae, words, quotes, study, notes, reflections
 
 ---
 ## [Al-Anon]({alanon_url})
+[{ONE_DAY_LABEL}]({one_day_url})
 
 
 ---
@@ -493,6 +500,11 @@ def _get_note_date(text: str, fallback: date) -> date:
     return fallback
 
 
+# Label of the reading link --generate puts under ## Al-Anon. --parse matches on
+# this label to keep the link out of the journal, so changing it here changes
+# both ends; notes generated under an older label would keep their link.
+ONE_DAY_LABEL = "One Day at a Time"
+
 SECTION_MAP = {
     "A Calendar of Wisdom": "tolstoy",
     "Al-Anon":              "alanon",
@@ -504,6 +516,18 @@ def _plain_heading(h: str) -> str:
     """Strip markdown link syntax from a heading: [text](url) → text"""
     m = re.match(r'^\[(.+?)\]\(.+?\)$', h.strip())
     return m.group(1) if m else h
+
+
+def _strip_reading_links(body: str) -> str:
+    """Remove the generated One Day at a Time link line from an Al-Anon section.
+
+    The link is a pointer to that day's reading, not part of Sean's reflection,
+    and _journal/ is his permanent record. Only a line that is exactly the link
+    is removed: a reflection written on the same line stays, link and all, since
+    dropping it would lose his words.
+    """
+    pattern = rf"^[ \t]*\[{re.escape(ONE_DAY_LABEL)}\]\(https?://[^)\s]+\)[ \t]*\n?"
+    return re.sub(pattern, "", body, flags=re.MULTILINE).strip()
 
 
 def extract_sections(text: str) -> dict[str, str]:
@@ -659,7 +683,7 @@ def parse(today: date, allow_today: bool = False):
         match = next((v for k, v in sections.items()
                       if _plain_heading(k) == heading or _plain_heading(k).startswith(heading)), None)
         if match is not None:
-            journal_sections[key] = match
+            journal_sections[key] = _strip_reading_links(match) if key == "alanon" else match
 
     if any(journal_sections.values()):
         # _journal/MM-DD.md is perennial — keyed by calendar day, because the
