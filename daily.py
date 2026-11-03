@@ -519,15 +519,16 @@ def _plain_heading(h: str) -> str:
 
 
 def _strip_reading_links(body: str) -> str:
-    """Remove the generated One Day at a Time link line from an Al-Anon section.
+    """Remove the generated One Day at a Time link from an Al-Anon section.
 
     The link is a pointer to that day's reading, not part of Sean's reflection,
-    and _journal/ is his permanent record. Only a line that is exactly the link
-    is removed: a reflection written on the same line stays, link and all, since
-    dropping it would lose his words.
+    and _journal/ is his permanent record. Only the link goes: anything he wrote
+    on the same line stays, since dropping it would lose his words.
     """
-    pattern = rf"^[ \t]*\[{re.escape(ONE_DAY_LABEL)}\]\(https?://[^)\s]+\)[ \t]*\n?"
-    return re.sub(pattern, "", body, flags=re.MULTILINE).strip()
+    link = rf"\[{re.escape(ONE_DAY_LABEL)}\]\(https?://[^)\s]+\)"
+    # A line holding only the link goes entirely, so no blank line is left behind.
+    body = re.sub(rf"^[ \t]*{link}[ \t]*\n?", "", body, flags=re.MULTILINE)
+    return re.sub(rf"[ \t]*{link}", "", body).strip()
 
 
 def extract_sections(text: str) -> dict[str, str]:
