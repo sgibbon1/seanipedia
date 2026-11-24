@@ -63,8 +63,18 @@ done
 # Two chains at once would run the brief twice (and mark mail read twice), so
 # the second one leaves the first to finish. lockf -t 0 fails immediately with
 # EX_TEMPFAIL (75) if the lock is held; that's not an error, so exit 0.
+#
+# ── …and keep the Mac awake until it's done ─────────────────────────────────
+# A sleeping Mac wakes for ~30 s at a time (Power Nap "dark wakes"); launchd
+# starts the chain in one, and the Mac used to fall back asleep mid-chain —
+# on 2026-11-06 parse + generate finished at 5:43, then the scrape froze until
+# 8:37 when the lid opened. caffeinate holds a no-sleep assertion for exactly
+# as long as the chain runs: -i blocks idle sleep, -s blocks system sleep
+# (honoured only on AC power — on battery macOS may still force a dark wake
+# back to sleep, which the power-source line in the log will show).
 if [ "${MORNING_CHAIN_LOCKED:-0}" != "1" ] && [ "$DRY" = "0" ]; then
-    MORNING_CHAIN_LOCKED=1 /usr/bin/lockf -s -t 0 "$LOCK" /bin/bash "$SELF" "$@"
+    MORNING_CHAIN_LOCKED=1 /usr/bin/caffeinate -is \
+        /usr/bin/lockf -s -t 0 "$LOCK" /bin/bash "$SELF" "$@"
     rc=$?
     if [ $rc -eq 75 ]; then
         echo "[chain] another morning chain is already running — leaving it to finish"
@@ -123,7 +133,7 @@ note_state() {
     fi
 }
 
-say "start — Today.md is $(note_state)"
+say "start — Today.md is $(note_state); power: $(/usr/bin/pmset -g batt | head -1 | sed "s/Now drawing from //; s/'//g")"
 failed=0
 
 # 1 + 2. parse → generate

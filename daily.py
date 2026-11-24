@@ -39,6 +39,7 @@ from dotenv import load_dotenv
 # The year-stacked _journal/MM-DD.md format lives in its own module so the
 # nightly parse and the one-time migration can't drift apart.
 import journal_years
+import sententiae_format
 
 # Secrets: LOCAL disk first (~/.config/seanipedia/.env), Drive copy as fallback.
 # Reading .env off the Google Drive mount is what killed the 2026-08-12 scheduled
@@ -685,6 +686,12 @@ def parse(today: date, allow_today: bool = False):
                       if _plain_heading(k) == heading or _plain_heading(k).startswith(heading)), None)
         if match is not None:
             journal_sections[key] = _strip_reading_links(match) if key == "alanon" else match
+    # A raw PDF paste → the journal's display layout (bold citation, quoted
+    # translation, italic original), so next year's On This Day shows it the
+    # way the OneNote-era entries look. See sententiae_format for the rules.
+    if journal_sections.get("sententiae"):
+        journal_sections["sententiae"] = sententiae_format.format_sententiae(
+            journal_sections["sententiae"])
 
     if any(journal_sections.values()):
         # _journal/MM-DD.md is perennial — keyed by calendar day, because the

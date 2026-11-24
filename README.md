@@ -158,7 +158,7 @@ VAULT_PATH=/tmp/vault-copy python3 daily.py --parse
 |---|---|
 | ## A Calendar of Wisdom | `_journal/MM-DD.md` → `## <year>` block |
 | ## Al-Anon | `_journal/MM-DD.md` → `## <year>` block. The heading links to *Courage to Change*; the *One Day at a Time* link on the line beneath it is removed by `--parse`, so it never reaches the journal. |
-| ## Sententiae Antiquae | `_journal/MM-DD.md` → `## <year>` block |
+| ## Sententiae Antiquae | `_journal/MM-DD.md` → `## <year>` block. Paste the passage as it comes (citation, translation in quotes, original); `--parse` lays it out as a **bold** citation, a `>` quoted translation and an *italic* original, joining the PDF's hard-wrapped lines, so it reads like the older entries in On This Day. An entry it can't read confidently (no translation in quotes) is filed exactly as written; hashtags or comments after the passage are kept below it. |
 | ## Words | `_journal/MM-DD.md` → `## <year>` block (+ new words → `_words.md`) |
 | ## Quotes | `_outbox/Quotes/YYYYMMDD.md` |
 | ## Daily Study | `_outbox/Daily Study/YYYYMMDD.md` — when a topic is scheduled, the section carries a `- [ ] Completed` box; check it off once done. Every day is archived, but `weekly_report.py` only credits **checked** days in the wiki/report (unchecked = assigned-but-skipped; legacy days with no box still count). |
@@ -227,6 +227,7 @@ python3 weekly_report.py --dry-run         # preview without writing
 
 | File | What |
 |---|---|
+| `sententiae_format.py` | Lays out a raw Sententiae paste (bold citation, quoted translation, italic original) for `--parse`. Never drops words; anything it can't parse is passed through verbatim. |
 | `journal_years.py` | The year-stacked `_journal/MM-DD.md` format: parse a day's `## YYYY` blocks, set one year's block (idempotent), refuse to write a file it can't parse. Shared by `daily.py`, `weekly_report.py` and the migration so they can't disagree. |
 | `migrate_journal_years.py` 👤 | One-time (run 2026-10-27) conversion of the 312 flat journal files into year blocks. Dry run by default; `--apply` to write; `--only 10-27` for one day. Safe to re-run — already-stacked files are skipped. |
 | `morning_chain.sh` ⏰ | Runs the morning's dependent jobs in order — see **Automation**. `--dry-run` shows what each step would do; `--force-brief` re-runs just today's brief (a same-day rescan). |
@@ -256,7 +257,7 @@ python3 weekly_report.py --dry-run         # preview without writing
 | 5. weekly | `run_weekly.sh` → `weekly_report.py` 🟢 | 1 — Sunday's report must include Saturday's filed note | carry on |
 | 6. reindex | `quotes_index.py`, then `quotes_blockids.py --apply` | — (runs after 5, which moves new quotes into `archive/`) | carry on |
 
-Each step runs through `~/scripts/resilient_run.sh` under the **same label** its old standalone job used (`daily-parse`, `daily-generate`, `natsec-jobs`, `daily-brief`, `weekly-report`, plus `quotes-index` / `quotes-blockids`). So each keeps its own retries (2, 10, 30 minutes), its Drive warm-up, its local `.env` sync, its stale-job notification — and its **"already succeeded today" stamp**, which is what makes three triggers safe: on the 6:45 and 8:00 triggers every finished step is a no-op and only unfinished work runs. The chain itself runs under `resilient_run.sh` with `RR_FORCE=1 RR_ATTEMPTS=1` (run on every trigger, no outer retries — the steps have their own) and takes a `lockf` lock so two triggers can't run it at once. Manual use:
+Each step runs through `~/scripts/resilient_run.sh` under the **same label** its old standalone job used (`daily-parse`, `daily-generate`, `natsec-jobs`, `daily-brief`, `weekly-report`, plus `quotes-index` / `quotes-blockids`). So each keeps its own retries (2, 10, 30 minutes), its Drive warm-up, its local `.env` sync, its stale-job notification — and its **"already succeeded today" stamp**, which is what makes three triggers safe: on the 6:45 and 8:00 triggers every finished step is a no-op and only unfinished work runs. The chain itself runs under `resilient_run.sh` with `RR_FORCE=1 RR_ATTEMPTS=1` (run on every trigger, no outer retries — the steps have their own) and takes a `lockf` lock so two triggers can't run it at once. It also runs under `caffeinate -is`, which keeps the Mac awake until the chain finishes: a sleeping Mac wakes for about 30 seconds at a time, and the chain used to start in one of those wakes and then freeze mid-run until the lid opened. On battery, macOS may still put it back to sleep; each run's first log line records the power source. Manual use:
 
 ```bash
 ./morning_chain.sh --dry-run       # what each step would do right now; runs nothing
